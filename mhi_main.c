@@ -723,6 +723,11 @@ MHI_STATUS parse_inbound(mhi_device_ctxt *device, u32 chan,
 		if (IS_SOFTWARE_CHANNEL(chan)) {
 			/* If a cb is registered for the client, invoke it*/
 			if (NULL != (client_handle->client_cbs.mhi_xfer_cb)) {
+				mhi_log(MHI_MSG_ERROR, "Invoking cb for chan 0x%x\n", chan);
+				MHI_TX_TRB_SET_LEN(TX_TRB_LEN,
+						local_ev_trb_loc,
+						xfer_len);
+				atomic_inc(&(local_chan_ctxt->nr_filled_elements));
 				client_handle->client_cbs.mhi_xfer_cb(result);
 			} else  {
 				/*Set the length field of the trb to the
