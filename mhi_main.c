@@ -721,24 +721,17 @@ MHI_STATUS parse_inbound(mhi_device_ctxt *device, u32 chan,
 	/* If a client is registered */
 	if (NULL != client_handle) {
 		if (IS_SOFTWARE_CHANNEL(chan)) {
+			MHI_TX_TRB_SET_LEN(TX_TRB_LEN,
+					local_ev_trb_loc,
+					xfer_len);
+			atomic_inc(&(local_chan_ctxt->nr_filled_elements));
 			/* If a cb is registered for the client, invoke it*/
 			if (NULL != (client_handle->client_cbs.mhi_xfer_cb)) {
 				mhi_log(MHI_MSG_ERROR, "Invoking cb for chan 0x%x\n", chan);
-				MHI_TX_TRB_SET_LEN(TX_TRB_LEN,
-						local_ev_trb_loc,
-						xfer_len);
-				atomic_inc(&(local_chan_ctxt->nr_filled_elements));
 				client_handle->client_cbs.mhi_xfer_cb(result);
-			} else  {
-				/*Set the length field of the trb to the
-				 *length reported in the event */
-				MHI_TX_TRB_SET_LEN(TX_TRB_LEN,
-						local_ev_trb_loc,
-						xfer_len);
-				atomic_inc(&(local_chan_ctxt->nr_filled_elements));
 			}
 		} else  {
-			/* IN Hardware channel with client
+			/* IN Hardware channel with no client
 			 * registered, we are done with this TRB*/
 			delete_element(local_chan_ctxt, NULL);
 		}

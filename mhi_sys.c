@@ -11,7 +11,7 @@
  */
 
 #include "mhi_sys.h"
-MHI_DEBUG_LEVEL mhi_msg_lvl = MHI_MSG_CRITICAL;
+MHI_DEBUG_LEVEL mhi_msg_lvl = MHI_MSG_VERBOSE;
 
 module_param(mhi_msg_lvl , uint, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(mhi_msg_lvl, "dbg lvl");
