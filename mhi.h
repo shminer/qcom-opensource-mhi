@@ -585,8 +585,9 @@ MHI_STATUS mhi_init_device_ctxt(mhi_pcie_dev_info *dev_info, mhi_device_ctxt** m
 MHI_STATUS mhi_init_isr(mhi_device_ctxt*);
 
 MHI_STATUS mhi_init_event_ring(mhi_device_ctxt* device, u32 nr_ev_el, u32 event_ring_index);
-MHI_STATUS mhi_event_ring_init(mhi_event_ctxt* ev_list, uintptr_t trb_list_phy, uintptr_t trb_list_virt,
-		size_t el_per_ring, mhi_ring* ring);
+MHI_STATUS mhi_event_ring_init(mhi_event_ctxt* ev_list, uintptr_t trb_list_phy,
+		uintptr_t trb_list_virt,
+		size_t el_per_ring, mhi_ring* ring, u32 intmodt_val);
 
 /*Mhi Initialization functions */
 MHI_STATUS mhi_create_ctxt(mhi_device_ctxt** mhi_device);

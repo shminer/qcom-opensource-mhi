@@ -499,6 +499,7 @@ MHI_STATUS mhi_init_contexts(mhi_device_ctxt *mhi_device)
 	mhi_xfer_pkt *trb_list = NULL;
 	mhi_chan_ctxt *chan_ctxt = NULL;
 	mhi_ring *local_event_ctxt = NULL;
+	u32 intmodt_val = 0;
 
 	for (i = 0; i < EVENT_RINGS_ALLOCATED; ++i) {
 		event_ring_index = mhi_device->alloced_ev_rings[i];
@@ -506,11 +507,15 @@ MHI_STATUS mhi_init_contexts(mhi_device_ctxt *mhi_device)
 		local_event_ctxt = 
 			&mhi_device->mhi_local_event_ctxt[event_ring_index];
 
+		if (i != PRIMARY_EVENT_RING)
+			intmodt_val = MHI_HW_INTMOD_VAL_MS;
+		else
+			intmodt_val = 0;
 		mhi_event_ring_init(event_ctxt,
 				mhi_v2p_addr(mhi_device->mhi_ctrl_seg_info,
 					(uintptr_t)mhi_ctrl->ev_trb_list[i]),
 				(uintptr_t)mhi_ctrl->ev_trb_list[i],
-				EV_EL_PER_RING, local_event_ctxt);
+				EV_EL_PER_RING, local_event_ctxt, intmodt_val);
 	}
 
 	/* Init Command Ring */
@@ -599,7 +604,7 @@ MHI_STATUS mhi_init_chan_ctxt(mhi_chan_ctxt *cc_list,
  */
 MHI_STATUS mhi_event_ring_init(mhi_event_ctxt *ev_list,
 		uintptr_t trb_list_phy_addr, uintptr_t trb_list_virt_addr,
-		size_t el_per_ring, mhi_ring *ring)
+		size_t el_per_ring, mhi_ring *ring, u32 intmodt_val)
 {
 	ev_list->mhi_event_er_type = MHI_EVENT_RING_TYPE_VALID;
 	ev_list->mhi_msi_vector = 1;
@@ -607,6 +612,7 @@ MHI_STATUS mhi_event_ring_init(mhi_event_ctxt *ev_list,
 	ev_list->mhi_event_ring_len = el_per_ring*sizeof(mhi_event_pkt);
 	ev_list->mhi_event_read_ptr = trb_list_phy_addr;
 	ev_list->mhi_event_write_ptr = trb_list_phy_addr;
+	MHI_SET_EV_CTXT(EVENT_CTXT_INTMODT, ev_list, intmodt_val);
 	ring->wp = (void *)(uintptr_t)trb_list_virt_addr;
 	ring->rp = (void *)(uintptr_t)trb_list_virt_addr;
 	ring->base = (void *)(uintptr_t)(trb_list_virt_addr);

@@ -219,6 +219,10 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	   MHI_TRB_SET_INFO(TX_TRB_BEI ,pkt_loc, 0);
 	   MHI_TRB_SET_INFO(TX_TRB_IEOT ,pkt_loc, 1);
 	   }*/
+	if (IS_HARDWARE_CHANNEL(chan))
+		MHI_TRB_SET_INFO(TX_TRB_BEI, pkt_loc, 1);
+	else
+		MHI_TRB_SET_INFO(TX_TRB_BEI, pkt_loc, 0);
 
 	MHI_TRB_SET_INFO(TX_TRB_IEOT, pkt_loc, 1);
 	MHI_TRB_SET_INFO(TX_TRB_IEOB, pkt_loc, 0);

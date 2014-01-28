@@ -14,7 +14,7 @@
 #include "shim.h"
 #define TRB_MAX_DATA_SIZE 0x1000
 
-SHIM_DBG_LEVEL mhi_shim_msg_lvl = SHIM_DBG_INFO;
+SHIM_DBG_LEVEL mhi_shim_msg_lvl = SHIM_DBG_CRITICAL;
 module_param(mhi_shim_msg_lvl , uint, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(mhi_shim_msg_lvl, "shim dbg lvl");
 
