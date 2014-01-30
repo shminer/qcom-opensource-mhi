@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -117,6 +117,12 @@ MHI_STATUS mhi_init_device_ctxt(mhi_pcie_dev_info *dev_info,
 					MHI_INIT_ERROR_STAGE_DEVICE_CTRL);
 		return MHI_STATUS_ERROR;
 	}
+	if (MHI_STATUS_SUCCESS != mhi_init_timers(*mhi_device)) {
+		mhi_log(MHI_MSG_ERROR, "Failed initializing timers\n");
+		mhi_clean_init_stage(*mhi_device,
+					MHI_INIT_ERROR_STAGE_DEVICE_CTRL);
+		return MHI_STATUS_ERROR;
+	}
 	if (MHI_STATUS_SUCCESS != mhi_spawn_threads(*mhi_device)) {
 		mhi_log(MHI_MSG_ERROR, "mhi_init> Failed to spawn threads\n");
 		return MHI_STATUS_ERROR;
@@ -141,7 +147,7 @@ MHI_STATUS mhi_create_ctxt(mhi_device_ctxt **mhi_device)
 	if (NULL == *mhi_device)
 		return MHI_STATUS_ALLOC_ERROR;
 	mhi_memset(*mhi_device, 0, sizeof(mhi_device_ctxt));
-	(*mhi_device)->mhi_device_state = MHI_STATE_RESET;
+	(*mhi_device)->mhi_state = MHI_STATE_RESET;
 	(*mhi_device)->nr_of_cc = MHI_MAX_CHANNELS;
 	(*mhi_device)->nr_of_ec = EVENT_RINGS_ALLOCATED;
 	(*mhi_device)->nr_of_cmdc = NR_OF_CMD_RINGS;
@@ -188,14 +194,22 @@ MHI_STATUS mhi_init_sync(mhi_device_ctxt *device)
 	if (NULL == device->mhi_cmd_mutex_list)
 		goto cmd_mutex_free;
 
+	device->db_write_lock = mhi_malloc(sizeof(osal_spinlock) *
+							MHI_MAX_CHANNELS);
+	if (NULL == device->db_write_lock)
+		goto db_write_lock_free;
 	for (i = 0; i < device->nr_of_cc; ++i)
 		mhi_init_mutex(&device->mhi_chan_mutex[i]);
 	for (i = 0; i < MHI_MAX_CHANNELS; ++i)
 		mhi_init_spinlock(&device->mhi_ev_spinlock_list[i]);
 	for (i = 0; i < device->nr_of_cmdc; ++i)
 		mhi_init_mutex(&device->mhi_cmd_mutex_list[i]);
+	for (i = 0; i < MHI_MAX_CHANNELS; ++i)
+		mhi_init_spinlock(&device->db_write_lock[i]);
+	rwlock_init(&device->xfer_lock);
 	return MHI_STATUS_SUCCESS;
 
+db_write_lock_free:
 	mhi_free(device->mhi_cmd_mutex_list);
 cmd_mutex_free:
 	mhi_free(device->mhi_chan_mutex);
@@ -292,19 +306,30 @@ MHI_STATUS mhi_init_events(mhi_device_ctxt *device)
 
 	device->event_handle = mhi_malloc(sizeof(osal_event));
 	if (NULL == device->event_handle) {
-		mhi_log(MHI_MSG_ERROR, "Failed to init thread handle");
+		mhi_log(MHI_MSG_ERROR, "Failed to init event");
 		return MHI_STATUS_ERROR;
 	}
 	device->state_change_event_handle = mhi_malloc(sizeof(osal_event));
 	if (NULL == device->state_change_event_handle) {
-		mhi_log(MHI_MSG_ERROR, "Failed to init thread handle");
+		mhi_log(MHI_MSG_ERROR, "Failed to init event");
 		goto error_event_handle_alloc;
 	}
 	/* Initialize the event which signals M0*/
 	device->M0_event = mhi_malloc(sizeof(osal_event));
 	if (NULL == device->M0_event) {
-		mhi_log(MHI_MSG_ERROR, "Failed to init thread handle");
+		mhi_log(MHI_MSG_ERROR, "Failed to init event");
 		goto error_state_change_event_handle;
+	}
+	device->mhi_xfer_stop = mhi_malloc(sizeof(osal_event));
+	if (NULL == device->mhi_xfer_stop) {
+		mhi_log(MHI_MSG_ERROR, "Failed to init event");
+		goto error_M0_event;
+	}
+	/* Initialize the event which signals M0*/
+	device->M3_event = mhi_malloc(sizeof(osal_event));
+	if (NULL == device->M3_event) {
+		mhi_log(MHI_MSG_ERROR, "Failed to init event");
+		goto error_M0_event;
 	}
 	/* Initialize the event which starts the event parsing thread */
 	mhi_init_event(device->event_handle);
@@ -312,9 +337,15 @@ MHI_STATUS mhi_init_events(mhi_device_ctxt *device)
 	mhi_init_event(device->state_change_event_handle);
 	/* Initialize the event which triggers clients waiting to send*/
 	mhi_init_event(device->M0_event);
+	/* Initialize the event which triggers D3hot*/
+	mhi_init_event(device->M3_event);
+	/* Initialize the event which signals that no clients are sending */
+	mhi_init_event(device->mhi_xfer_stop);
 
 	return MHI_STATUS_SUCCESS;
 
+error_M0_event:
+	mhi_free(device->M0_event);
 error_state_change_event_handle:
 	mhi_free(device->state_change_event_handle);
 error_event_handle_alloc:
@@ -664,3 +695,13 @@ MHI_STATUS mhi_reset_all_thread_queues(mhi_device_ctxt *device)
 	return ret_val;
 }
 
+MHI_STATUS mhi_init_timers(mhi_device_ctxt *device)
+{
+	hrtimer_init(&device->inactivity_tmr,
+			CLOCK_MONOTONIC,
+			HRTIMER_MODE_REL);
+	device->inactivity_timeout =
+			ktime_set(0, MHI_M1_ENTRY_DELAY_MS * 1E6L);
+	device->inactivity_tmr.function = mhi_initiate_M1;
+	return MHI_STATUS_SUCCESS;
+}

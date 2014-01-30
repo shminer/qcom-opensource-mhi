@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -77,7 +77,6 @@ static int mhi_shim_client_open(struct inode *mhi_inode,
 		mhi_shim_log(SHIM_DBG_ERROR,
 				"Failed open outbound chan 0x%x ret 0x%x\n",
 				iminor(mhi_inode), ret_val);
-		goto out_handle_err;
 	}
 
 	/* If this channel was never opened before */
@@ -85,8 +84,6 @@ static int mhi_shim_client_open(struct inode *mhi_inode,
 
 	return 0;
 
-out_handle_err:
-	vfree(shim_client_handle);
 handle_alloc_err:
 	return ret_val;
 }
@@ -226,6 +223,7 @@ int mhi_shim_probe(struct pci_dev *dev)
 				"Failed to init client attributes\n");
 		return -EIO;
 	}
+	mhi_shim_log(SHIM_DBG_VERBOSE, "Initializing clients\n");
 	/* Initiate the inbound path for all client handles */
 	for (i = 0; i < MHI_SOFTWARE_CLIENT_LIMIT; ++i) {
 		curr_client = &mhi_shim_ctxt.client_handle_list[i];
@@ -235,6 +233,7 @@ int mhi_shim_probe(struct pci_dev *dev)
 		curr_client->in_chan = i * 2 + 1;
 		curr_client->client_index = i;
 
+		mhi_shim_log(SHIM_DBG_VERBOSE, "Attempting to open channel: \n");
 		ret_val = mhi_shim_open_channel(init_handle,
 				curr_client->in_chan,
 				0,
@@ -249,6 +248,7 @@ int mhi_shim_probe(struct pci_dev *dev)
 			mhi_shim_log(SHIM_DBG_ERROR,
 			"Failed to init inbound 0x%x, ret 0x%x\n", i, ret_val);
 	}
+	mhi_shim_log(SHIM_DBG_VERBOSE, "Allocating char devices\n");
 	/* Bring up the char devices */
 	r = alloc_chrdev_region(&mhi_shim_ctxt.start_ctrl_nr,
 			0, MHI_MAX_SOFTWARE_CHANNELS,
@@ -259,6 +259,7 @@ int mhi_shim_probe(struct pci_dev *dev)
 				"Failed to alloc char devs, ret 0x%x\n", r);
 		goto failed_char_alloc;
 	}
+	mhi_shim_log(SHIM_DBG_VERBOSE, "Creating class\n");
 	mhi_shim_ctxt.mhi_shim_class = class_create(THIS_MODULE,
 						DEVICE_NAME);
 	if (IS_ERR(mhi_shim_ctxt.mhi_shim_class)) {
@@ -268,6 +269,7 @@ int mhi_shim_probe(struct pci_dev *dev)
 		goto failed_class_add;
 	}
 
+	mhi_shim_log(SHIM_DBG_VERBOSE, "Setting up contexts\n");
 	for (i = 0; i < MHI_SOFTWARE_CLIENT_LIMIT; ++i) {
 
 		cdev_init(&mhi_shim_ctxt.cdev[i], &mhi_shim_client_fops);
@@ -363,15 +365,25 @@ int mhi_shim_send_packet(mhi_shim_client_handle *client_handle,
 		}
 
 		data_left_to_insert -= data_to_insert_now;
-		data_inserted_so_far += data_to_insert_now;
 
 		chain = (data_left_to_insert > 0) ? 1 : 0;
 		ret_val = mhi_shim_queue_xfer(client_handle, dma_addr,
 				data_to_insert_now, chain);
 		if (0 != ret_val)
+		{
+			data_inserted_so_far = 0;
+			dma_unmap_single(NULL,
+				(dma_addr_t)dma_addr,
+				data_to_insert_now,
+				DMA_TO_DEVICE);
+			kfree(data_loc);
 			break;
+		}
 		if (0 == data_left_to_insert || 0 == avail_buf_space)
+		{
+			data_inserted_so_far += data_to_insert_now;
 			break;
+		}
 	}
 	return data_inserted_so_far;
 }

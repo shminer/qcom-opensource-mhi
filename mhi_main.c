@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -9,11 +9,125 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License for more details.
  */
-#include "mhi_sys.h" 
+#include "mhi_sys.h"
 #include "mhi.h"
 #include "mhi_hwio.h"
 #include "mhi_macros.h"
 
+extern struct pci_driver mhi_pcie_driver;
+int mhi_init_pcie_device (mhi_pcie_dev_info *mhi_pcie_dev)
+{
+	int ret_val = 0;
+	u32 j = 0;
+	long int sleep_time = 100000;
+	struct pci_dev* pcie_device = (struct pci_dev*)mhi_pcie_dev->pcie_device;
+	/* Enable the device */
+	do {
+		ret_val = pci_enable_device(mhi_pcie_dev->pcie_device);
+		if (0 != ret_val) {
+			mhi_log(MHI_MSG_ERROR,
+				"Failed to enable pcie device ret_val=%d\n",
+				ret_val);
+			mhi_log(MHI_MSG_ERROR,
+				"Sleeping for ~ %li uS, and retrying.\n",
+				sleep_time);
+			usleep(sleep_time);
+		}
+	} while(ret_val != 0);
+
+	mhi_log(MHI_MSG_INFO, "Successfully enabled pcie device.\n");
+
+	mhi_pcie_dev->core.bar0_base =
+		(uintptr_t)ioremap_nocache(pci_resource_start(pcie_device, 0),
+			pci_resource_len(pcie_device, 0));
+	mhi_pcie_dev->core.bar0_end = mhi_pcie_dev->core.bar0_base +
+		pci_resource_len(pcie_device, 0);
+	mhi_pcie_dev->core.bar2_base =
+		(uintptr_t)ioremap_nocache(pci_resource_start(pcie_device, 2),
+			pci_resource_len(pcie_device, 2));
+	mhi_pcie_dev->core.bar2_end = mhi_pcie_dev->core.bar2_base +
+		pci_resource_len(pcie_device, 2);
+
+	if (0 == mhi_pcie_dev->core.bar0_base)
+	{
+		mhi_log(MHI_MSG_ERROR,
+			"Failed to register for pcie resources\n");
+		goto mhi_pcie_read_ep_config_err;
+	}
+
+	mhi_log(MHI_MSG_INFO,"Device BAR0 address is at 0x%llx\n",
+			mhi_pcie_dev->core.bar0_base);
+
+	if (0 != (ret_val = pci_request_region(pcie_device,
+					0, mhi_pcie_driver.name)))
+	{
+		mhi_log(MHI_MSG_ERROR, "Could not request BAR0 region\n");
+	}
+
+	mhi_pcie_dev->core.manufact_id = pcie_device->vendor;
+	mhi_pcie_dev->core.dev_id = pcie_device->device;
+
+	if (mhi_pcie_dev->core.manufact_id != MHI_PCIE_VENDOR_ID ||
+			mhi_pcie_dev->core.dev_id != MHI_PCIE_DEVICE_ID)
+	{
+		mhi_log(MHI_MSG_ERROR, "Incorrect device/manufacturer ID\n");
+		goto mhi_pcie_read_ep_config_err;
+	}
+	/* We need to ensure that the link is stable before we kick off MHI */
+	j = 0;
+	while (0xFFFFffff == pcie_read(mhi_pcie_dev->core.bar0_base, MHIREGLEN)
+			&& j <= MHI_MAX_LINK_RETRIES) {
+		mhi_log(MHI_MSG_ERROR, "LINK INSTABILITY DETECTED, retry %d\n", j);
+		msleep(MHI_LINK_STABILITY_WAIT_MS);
+		if (MHI_MAX_LINK_RETRIES == j)
+		{
+			ret_val = -EIO;
+			mhi_log(MHI_MSG_ERROR,
+				"LINK INSTABILITY DETECTED, FAILING!\n");
+			goto mhi_device_list_error;
+		}
+		j++;
+	}
+	return 0;
+mhi_device_list_error:
+	pci_disable_device(pcie_device);
+mhi_pcie_read_ep_config_err:
+	return -EIO;
+}
+
+int mhi_init_gpios(mhi_pcie_dev_info *mhi_pcie_dev)
+{
+	int ret_val = 0;
+	mhi_log(MHI_MSG_VERBOSE | MHI_DBG_POWER,
+			"Attempting to grab DEVICE_WAKE gpio\n");
+
+	ret_val = gpio_request(MHI_DEVICE_WAKE_GPIO, "mhi");
+	if (ret_val) {
+		mhi_log(MHI_MSG_VERBOSE | MHI_DBG_POWER,
+			"Could not obtain device WAKE gpio\n");
+	}
+	mhi_log(MHI_MSG_VERBOSE | MHI_DBG_POWER,
+		"Attempting to set output direction to DEVICE_WAKE gpio\n");
+	/* This GPIO must never sleep as it can be set in timer ctxt */
+	gpio_set_value_cansleep(MHI_DEVICE_WAKE_GPIO, 0);
+	if (ret_val)
+		mhi_log(MHI_MSG_ERROR | MHI_DBG_POWER,
+		"Could not set GPIO to not sleep!\n");
+
+	ret_val = gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
+
+	if (ret_val)
+	{
+		mhi_log(MHI_MSG_ERROR | MHI_DBG_POWER,
+				"Failed to set output direction of DEVICE_WAKE gpio\n");
+		goto mhi_gpio_dir_err;
+	}
+	return 0;
+
+mhi_gpio_dir_err:
+	gpio_free(MHI_DEVICE_WAKE_GPIO);
+	return -EIO;
+}
 MHI_STATUS mhi_open_channel(mhi_client_handle **client_handle,
 		MHI_CLIENT_CHANNEL chan, s32 device_index,
 		mhi_client_cbs_t *cbs, void *UserData)
@@ -32,7 +146,8 @@ MHI_STATUS mhi_open_channel(mhi_client_handle **client_handle,
 	}
 	mhi_log(MHI_MSG_INFO,
 			"Opened channel 0x%x for client\n", chan);
-	MHI_ATOMIC_INC(&mhi_devices.device_list[device_index].ref_count);
+
+	atomic_inc(&mhi_devices.device_list[device_index].ref_count);
 
 	*client_handle = mhi_malloc(sizeof(mhi_client_handle));
 	if (NULL == *client_handle) {
@@ -46,9 +161,10 @@ MHI_STATUS mhi_open_channel(mhi_client_handle **client_handle,
 	mhi_ctrl_seg = (*client_handle)->mhi_dev_ctxt->mhi_ctrl_seg;
 
 	(*client_handle)->mhi_dev_ctxt->client_handle_list[chan] =
-		*client_handle;
+							*client_handle;
 	if (NULL != cbs)
 		(*client_handle)->client_cbs = *cbs;
+
 	(*client_handle)->user_data = UserData;
 	(*client_handle)->event_ring_index =
 		mhi_ctrl_seg->mhi_cc_list[chan].mhi_event_ring_index;
@@ -64,7 +180,7 @@ void mhi_close_channel(mhi_client_handle *mhi_handle)
 		return;
 	index = mhi_handle->device_index;
 	mhi_handle->mhi_dev_ctxt->client_handle_list[mhi_handle->chan] = NULL;
-	MHI_ATOMIC_DEC(&(mhi_devices.device_list[index].ref_count));
+	atomic_dec(&(mhi_devices.device_list[index].ref_count));
 	mhi_free(mhi_handle);
 }
 
@@ -79,7 +195,7 @@ MHI_STATUS mhi_add_elements_to_event_rings(mhi_device_ctxt *device,
 					MHI_STATE_TRANSITION new_state)
 {
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
-	switch(new_state){
+	switch (new_state){
 	case STATE_TRANSITION_READY:
 		ret_val = mhi_init_event_ring(device,
 				EV_EL_PER_RING,
@@ -148,6 +264,7 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
 	MHI_CLIENT_CHANNEL chan = 0;
 	mhi_device_ctxt *mhi_dev_ctxt = NULL;
+	unsigned long flags;
 	uintptr_t trb_index = 0;
 
 	if (NULL == client_handle || !VALID_CHAN_NR(client_handle->chan) ||
@@ -157,7 +274,6 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	}
 
 	MHI_OSAL_ASSERT(VALID_BUF(buf, buf_len));
-
 	mhi_dev_ctxt = client_handle->mhi_dev_ctxt;
 	chan = client_handle->chan;
 
@@ -168,24 +284,23 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	}
 
 	/* Bump up the vote for pending data */
-	MHI_ATOMIC_INC(&mhi_dev_ctxt->data_pending);
-	if (MHI_STATE_M0 != mhi_dev_ctxt->mhi_state) {
-		assert_device_wake();
-		if (0 == wait_event_interruptible_timeout(
-				mhi_dev_ctxt->M0_event->event,
-				MHI_STATE_M0 == mhi_dev_ctxt->mhi_state,
-				MHI_MAX_TIMEOUT_MS))
+	read_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
 
-			mhi_log(MHI_MSG_CRITICAL,
-					"Failed to transition to M0 in %dms\n",
-					MHI_MAX_TIMEOUT_MS);
+	if (1 == atomic_add_return(1, &mhi_dev_ctxt->data_pending))
+	{
+		hrtimer_try_to_cancel(&mhi_dev_ctxt->inactivity_tmr);
+		mhi_dev_ctxt->m1_m0++;
 	}
+	gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
+
+	read_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
+
 	/* Add the TRB to the correct transfer ring */
 	ret_val = add_element(&mhi_dev_ctxt->mhi_local_chan_ctxt[chan],
 				(void *)&pkt_loc);
 	if (MHI_STATUS_SUCCESS != ret_val) {
 		mhi_log(MHI_MSG_INFO, "Failed to insert trb in xfer ring\n");
-		return ret_val;
+		goto error;
 	}
 
 	pkt_loc->data_tx_pkt.buffer_ptr = (uintptr_t)buf;
@@ -223,16 +338,41 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 		MHI_TRB_SET_INFO(TX_TRB_BEI, pkt_loc, 1);
 	else
 		MHI_TRB_SET_INFO(TX_TRB_BEI, pkt_loc, 0);
-
 	MHI_TRB_SET_INFO(TX_TRB_IEOT, pkt_loc, 1);
 	MHI_TRB_SET_INFO(TX_TRB_IEOB, pkt_loc, 0);
 	MHI_TRB_SET_INFO(TX_TRB_TYPE, pkt_loc, MHI_PKT_TYPE_TRANSFER);
 	MHI_TX_TRB_SET_LEN(TX_TRB_LEN, pkt_loc, buf_len);
-	db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
+
+
+	if (MHI_STATE_M0 == mhi_dev_ctxt->mhi_state ||
+		MHI_STATE_M1 == mhi_dev_ctxt->mhi_state) {
+		mhi_log(MHI_MSG_INFO,
+			"Current MHI device state %d\n",
+			mhi_dev_ctxt->mhi_state);
+		atomic_inc(&mhi_dev_ctxt->mhi_chan_db_order[chan]);
+		mhi_acquire_spinlock(&mhi_dev_ctxt->db_write_lock[chan]);
+		db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 			(uintptr_t)mhi_dev_ctxt->mhi_local_chan_ctxt[chan].wp);
-	MHI_WRITE_DB(mhi_dev_ctxt->channel_db_addr, chan, db_value);
-	MHI_ATOMIC_DEC(&mhi_dev_ctxt->data_pending);
+		MHI_WRITE_DB(mhi_dev_ctxt->channel_db_addr, chan, db_value);
+		mhi_release_spinlock(&mhi_dev_ctxt->db_write_lock[chan]);
+	} else {
+		mhi_log(MHI_MSG_INFO,
+			"Current MHI device state %d, not M0 or M1\n",
+			mhi_dev_ctxt->mhi_state);
+	}
+	/* If there are no clients still sending we can trigger our
+	 * inactivity timer */
+	if (0 == atomic_sub_return(1, &mhi_dev_ctxt->data_pending))
+	{
+		hrtimer_start(&mhi_dev_ctxt->inactivity_tmr,
+			mhi_dev_ctxt->inactivity_timeout,
+			HRTIMER_MODE_REL);
+		wake_up(&mhi_dev_ctxt->mhi_xfer_stop->event);
+	}
 	return MHI_STATUS_SUCCESS;
+error:
+	atomic_dec(&mhi_dev_ctxt->data_pending);
+	return ret_val;
 }
 /**
  * @brief Function used to send a command TRE to the mhi device.
@@ -482,29 +622,40 @@ MHI_STATUS recycle_trb_and_ring(mhi_device_ctxt *device,
 				(uintptr_t)ring->wp);
 	if (MHI_STATUS_SUCCESS != ret_val)
 		return ret_val;
-	switch (ring_type) {
-	case MHI_RING_TYPE_CMD_RING:
-		MHI_WRITE_DB(device->cmd_db_addr,
-				ring_index, db_value);
-		break;
-	case MHI_RING_TYPE_EVENT_RING:
-		MHI_WRITE_DB(device->event_db_addr,
-				ring_index, db_value);
-		break;
-	case MHI_RING_TYPE_XFER_RING:
+	if (MHI_RING_TYPE_XFER_RING == ring_type)
 	{
 		mhi_xfer_pkt *removed_xfer_pkt =
 			(mhi_xfer_pkt *)removed_element;
 		mhi_xfer_pkt *added_xfer_pkt =
 			(mhi_xfer_pkt *)added_element;
 		added_xfer_pkt->data_tx_pkt =
-				*(mhi_tx_pkt*)removed_xfer_pkt;
-		MHI_WRITE_DB(device->channel_db_addr,
-				ring_index, db_value);
-		break;
+				*(mhi_tx_pkt *)removed_xfer_pkt;
 	}
-	default:
-		mhi_log(MHI_MSG_ERROR, "Bad ring type\n");
+	atomic_inc(&device->data_pending);
+	if (MHI_STATE_M0 == device->mhi_state ||
+	    MHI_STATE_M1 == device->mhi_state) {
+		switch (ring_type) {
+		case MHI_RING_TYPE_CMD_RING:
+			MHI_WRITE_DB(device->cmd_db_addr,
+					ring_index, db_value);
+			break;
+		case MHI_RING_TYPE_EVENT_RING:
+			MHI_WRITE_DB(device->event_db_addr,
+					ring_index, db_value);
+			break;
+		case MHI_RING_TYPE_XFER_RING:
+		{
+			MHI_WRITE_DB(device->channel_db_addr,
+					ring_index, db_value);
+			break;
+		}
+		default:
+			mhi_log(MHI_MSG_ERROR, "Bad ring type\n");
+		}
+	}
+	if (0 == atomic_sub_return(1, &device->data_pending))
+	{
+		wake_up(&device->mhi_xfer_stop->event);
 	}
 	return ret_val;
 }
@@ -723,17 +874,18 @@ MHI_STATUS parse_inbound(mhi_device_ctxt *device, u32 chan,
 	/* If a client is registered */
 	if (NULL != client_handle) {
 		if (IS_SOFTWARE_CHANNEL(chan)) {
-			MHI_TX_TRB_SET_LEN(TX_TRB_LEN,
+				/*Set the length field of the trb to the
+				*length reported in the event */
+				MHI_TX_TRB_SET_LEN(TX_TRB_LEN,
 					local_ev_trb_loc,
 					xfer_len);
-			atomic_inc(&(local_chan_ctxt->nr_filled_elements));
+				atomic_inc(&(local_chan_ctxt->nr_filled_elements));
 			/* If a cb is registered for the client, invoke it*/
-			if (NULL != (client_handle->client_cbs.mhi_xfer_cb)) {
-				mhi_log(MHI_MSG_ERROR, "Invoking cb for chan 0x%x\n", chan);
+			if (NULL != (client_handle->client_cbs.mhi_xfer_cb))
 				client_handle->client_cbs.mhi_xfer_cb(result);
-			}
+
 		} else  {
-			/* IN Hardware channel with no client
+			/* IN Hardware channel with client
 			 * registered, we are done with this TRB*/
 			delete_element(local_chan_ctxt, NULL);
 		}
@@ -771,20 +923,24 @@ MHI_STATUS parse_outbound(mhi_device_ctxt *device, u32 chan,
 			NULL != (&client_handle->client_cbs.mhi_xfer_cb))
 		client_handle->client_cbs.mhi_xfer_cb(result);
 
-	MHI_OSAL_ASSERT(MHI_STATUS_SUCCESS == 
-			delete_element( &device->mhi_local_chan_ctxt[chan],
+	MHI_OSAL_ASSERT(MHI_STATUS_SUCCESS ==
+			delete_element(&device->mhi_local_chan_ctxt[chan],
 					NULL));
 	return MHI_STATUS_SUCCESS;
 }
 
 MHI_STATUS probe_clients(mhi_device_ctxt *device)
 {
-	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
+	int ret_val = 0;
 	ret_val = rmnet_mhi_probe(device->dev_info->pcie_device);
 	if (0 != ret_val)
+	{
 		mhi_log(MHI_MSG_CRITICAL, "MHI Rmnet Failed to probe.\n");
+		goto error;
+	}
 	ret_val = mhi_shim_probe(device->dev_info->pcie_device);
 	if (0 != ret_val)
 		mhi_log(MHI_MSG_CRITICAL, "MHI Shim Failed to probe.\n");
+error:
 	return ret_val;
 }

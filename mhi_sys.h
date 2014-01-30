@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -22,7 +22,6 @@
 #include <linux/slab.h> /* GFP - general purpose allocator */
 #include <linux/kthread.h>
 #include <linux/wait.h> /* wait_event */
-#include <linux/vmalloc.h> /* vmalloc() */
 #include <linux/dma-mapping.h> /* dma_alloc_coherent */
 #include <asm/string.h>
 #include <linux/delay.h>
@@ -32,20 +31,30 @@
 #include <linux/device.h> /* struct device */
 #include <linux/interrupt.h>
 #include <linux/atomic.h>
+#include <linux/gpio.h>
+#include <linux/sysfs.h>
+#include <linux/miscdevice.h>
+#include <linux/fs.h>
+#include <linux/jiffies.h>
+#include <linux/sysfs.h>
+#include <linux/hrtimer.h>
+#include <linux/spinlock_types.h>
+#include <linux/pm.h>
+#include <mach/msm_pcie.h>
+#include <linux/debugfs.h>
+#include <linux/uaccess.h>
+#include "mhi.h"
+extern MHI_DEBUG_LEVEL mhi_msg_lvl;
+extern MHI_DEBUG_CLASS mhi_msg_class;
 #define MHI_OSAL_ASSERT(_x) if(!(_x))\
 {\
 	printk("ASSERT- Failure in %s:%d/%s()!\n", __FILE__, __LINE__, __func__); \
 	panic("ASSERT"); \
 }
-extern MHI_DEBUG_LEVEL mhi_msg_lvl;
 
-#define MHI_ATOMIC_INC(_x) atomic_inc(_x)
-#define MHI_ATOMIC_DEC(_x) atomic_dec(_x)
 #define mhi_log(_msg_lvl, _msg,...) do { \
-	if (_msg_lvl >= mhi_msg_lvl) \
-	{				\
+		if ((_msg_lvl) >= mhi_msg_lvl)					\
 		pr_info("[%s] "_msg,__func__, ##__VA_ARGS__);\
-	}						 \
 }while(0)
 
 
@@ -113,6 +122,7 @@ void mhi_freememregion(mhi_meminfo *meminfo);
 
 MHI_STATUS mhi_init_event(osal_event* new_event);
 MHI_STATUS mhi_trigger_event(osal_event* new_event);
+int mhi_init_debugfs(mhi_device_ctxt* mhi_dev_ctxt);
 
 #endif
 

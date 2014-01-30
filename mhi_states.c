@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -11,43 +11,6 @@
  */
 #include "mhi_sys.h"
 #include "mhi_hwio.h"
-
-MHI_STATUS mhi_suspend(mhi_device_ctxt *device)
-{
-	MHI_STATE host_from_state = MHI_STATE_LIMIT;
-	MHI_STATE device_from_state = MHI_STATE_LIMIT;
-	u32 pcie_word_val = 0;
-	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
-
-	if (NULL == device)
-		return MHI_STATUS_ERROR;
-
-	host_from_state = device->mhi_state;
-	device_from_state = (MHI_STATE)pcie_read(device->mmio_addr, MHISTATUS);
-	MHI_READ_FIELD(pcie_word_val, MHISTATUS_READY_MASK,
-		       MHISTATUS_READY_SHIFT);
-	device_from_state = (MHI_STATE)pcie_word_val;
-
-	if (host_from_state != device_from_state)
-		mhi_log(MHI_MSG_INFO,
-			"State mismatch host state:0x%x, device state 0x%x\n",
-			host_from_state, device_from_state);
-
-	if ((host_from_state != MHI_STATE_M1)
-	    || (host_from_state != MHI_STATE_M0)) {
-		mhi_log(MHI_MSG_ERROR,
-			"Illegal host state transition from: 0x%x, to M3\n",
-			host_from_state);
-		ret_val = MHI_STATUS_ERROR;
-		goto end;
-	}
-	device->mhi_state = MHI_STATE_M3;
-	MHI_REG_WRITE_FIELD(device->mmio_addr, MHICTRL, MHICTRL_MHISTATE_MASK,
-			    MHICTRL_MHISTATE_SHIFT, MHI_STATE_M3);
-
-end:
-	return ret_val;
-}
 
 /**
  * @brief Initialize a full MHI reset procedure. The call first sends the MDM a
@@ -237,8 +200,6 @@ MHI_STATUS mhi_reset_channel(mhi_device_ctxt *device, u32 chan_id)
 
 	if (MHI_STATUS_SUCCESS !=
 		mhi_release_mutex(&device->mhi_chan_mutex[chan_id])) {
-		mhi_log(MHI_MSG_ERROR, "Failed release mutex of chan 0x%x",
-			chan_id);
 		return MHI_STATUS_ERROR;
 	}
 	return ret_val;
@@ -335,13 +296,12 @@ MHI_STATUS process_stt_work_item(mhi_device_ctxt  *device,
 		ret_val = process_M1_transition(device, cur_work_item);
 		break;
 	case STATE_TRANSITION_M2:
-		device->mhi_device_state = MHI_STATE_M2;
 		device->mhi_state = MHI_STATE_M2;
 		ret_val = MHI_STATUS_SUCCESS;
 		break;
 	case STATE_TRANSITION_M3:
-		mhi_log(MHI_MSG_INFO, "Got state transition to 0x%x\n",
-			cur_work_item->new_state);
+			ret_val = process_M3_transition(device, cur_work_item);
+			break;
 	case STATE_TRANSITION_SYS_ERR:
 		ret_val = process_SYSERR_transition(device, cur_work_item);
 		break;
@@ -369,7 +329,7 @@ MHI_STATUS process_M0_transition(mhi_device_ctxt *device,
 	while (!device_state_change) {
 		if (++i >= 10) {
 			mhi_log(MHI_MSG_ERROR,
-				"Time out! Device did not report M0.\n");
+					"Time out! STATUS register not M0.\n");
 			ret_val = MHI_STATUS_DEVICE_NOT_READY;
 			break;
 		} else {
@@ -382,10 +342,17 @@ MHI_STATUS process_M0_transition(mhi_device_ctxt *device,
 				device_state_change = 1;
 			} else {
 				mhi_log(MHI_MSG_ERROR,
-					"Device reported state change to M0\n");
+						"STATUS register not M0\n");
 				mhi_sleep(1000);
 			}
 		}
+		/* Proxy vote to prevent M3 while we are ringing DBs */
+		atomic_inc(&device->data_pending);
+		if (device->mhi_state == MHI_STATE_M2)
+			device->m2_m0++;
+		else if (device->mhi_state == MHI_STATE_M3)
+			device->m3_m0++;
+		device->mhi_state = MHI_STATE_M0;
 		if (0 == device->mhi_initialized) {
 			ret_val = mhi_add_elements_to_event_rings(device,
 						cur_work_item->new_state);
@@ -394,32 +361,66 @@ MHI_STATUS process_M0_transition(mhi_device_ctxt *device,
 			device->mhi_initialized = 1;
 			ret_val = mhi_set_state_of_all_channels(device,
 					MHI_CHAN_STATE_RUNNING);
-			device->mhi_device_state = MHI_STATE_M0;
-			device->mhi_state = MHI_STATE_M0;
+			if (MHI_STATUS_SUCCESS != ret_val)
+				mhi_log(MHI_MSG_CRITICAL,
+						"Failed to set local chan state\n");
 			ret_val = probe_clients(device);
 			if (ret_val != MHI_STATUS_SUCCESS)
-			mhi_log(MHI_MSG_CRITICAL,
-				"Failed to probe MHI CORE clients.\n");
+				mhi_log(MHI_MSG_CRITICAL,
+						"Failed to probe MHI CORE clients.\n");
+		} else {
+			ring_all_chan_dbs(device);
 		}
+		if (0 == atomic_sub_return(1, &device->data_pending))
+			wake_up(&device->mhi_xfer_stop->event);
 	}
-	if (MHI_STATUS_SUCCESS != ret_val)
-		mhi_log(MHI_MSG_CRITICAL, "Failed to set local chan state\n");
-	return ret_val;
+	wake_up(&device->M0_event->event);
+	return MHI_STATUS_SUCCESS;
 }
-MHI_STATUS process_M1_transition(mhi_device_ctxt  *device,
-			mhi_state_work_item *cur_work_item)
+
+void ring_all_chan_dbs(mhi_device_ctxt* device)
 {
-	mhi_log(MHI_MSG_INFO, "Processing M1 state transition\n");
-	/* If this is a M0 -> M1 transition */
-	if (device->mhi_device_state == MHI_STATE_M0) {
-		device->mhi_state = MHI_STATE_M1;
-		device->mhi_device_state = MHI_STATE_M1;
-		/* Allow the device to go into M2 if no data pending */
-		MHI_REG_WRITE_FIELD(device->mmio_addr, MHICTRL,
-				MHICTRL_MHISTATE_MASK,
-				MHICTRL_MHISTATE_SHIFT,
-				MHI_STATE_M2);
-	}
+	u32 i = 0;
+	u64 db_value;
+	u64 rp;
+	for (i = 0; i < MHI_MAX_CHANNELS; ++i)
+		if (VALID_CHAN_NR(i))
+		{
+			rp = mhi_v2p_addr(device->mhi_ctrl_seg_info,
+				(uintptr_t)device->mhi_local_chan_ctxt[i].rp);
+			db_value = mhi_v2p_addr(device->mhi_ctrl_seg_info,
+				(uintptr_t)device->mhi_local_chan_ctxt[i].wp);
+			if (rp != db_value)
+			{
+				atomic_set(&device->mhi_chan_db_order[i], 0);
+				if (1 == atomic_add_return(1,
+						&device->mhi_chan_db_order[i]))
+
+					mhi_acquire_spinlock(&device->db_write_lock[i]);
+					db_value = mhi_v2p_addr(device->mhi_ctrl_seg_info,
+						(uintptr_t)device->mhi_local_chan_ctxt[i].wp);
+					MHI_WRITE_DB(device->channel_db_addr,
+							i, db_value);
+					mhi_release_spinlock(&device->db_write_lock[i]);
+			}
+		}
+}
+
+MHI_STATUS process_M1_transition(mhi_device_ctxt  *device,
+		mhi_state_work_item *cur_work_item)
+{
+	mhi_log(MHI_MSG_INFO,
+			"Processing M1 state transition, previous device state %d\n",
+			device->mhi_state);
+	mhi_log(MHI_MSG_INFO, "Allowing transition to M2\n");
+	device->m0_m1++;
+	device->mhi_state = MHI_STATE_M2;
+	MHI_REG_WRITE_FIELD(device->mmio_addr, MHICTRL,
+			MHICTRL_MHISTATE_MASK,
+			MHICTRL_MHISTATE_SHIFT,
+			MHI_STATE_M2);
+	device->m1_m2++;
+
 	return MHI_STATUS_SUCCESS;
 }
 MHI_STATUS process_BHI_transition(mhi_device_ctxt *device,
@@ -473,11 +474,10 @@ MHI_STATUS process_RESET_transition(mhi_device_ctxt *device,
 	ret_val = mhi_test_for_device_ready(device);
 	/* Poll on the READY bit in MMIO */
 	switch (ret_val) {
-	case MHI_STATUS_SUCCESS:
-		device->mhi_device_state = MHI_STATE_READY;
-		device->mhi_state = MHI_STATE_READY;
-		if (MHI_STATUS_SUCCESS != mhi_init_state_transition(device,
-				STATE_TRANSITION_READY))
+		case MHI_STATUS_SUCCESS:
+			device->mhi_state = MHI_STATE_READY;
+			if (MHI_STATUS_SUCCESS != mhi_init_state_transition(device,
+						STATE_TRANSITION_READY))
 
 			mhi_log(MHI_MSG_CRITICAL,
 			"Failed to initiate 0x%x state trans\n",
@@ -516,4 +516,18 @@ MHI_STATUS process_SYSERR_transition(mhi_device_ctxt *device,
 		mhi_log(MHI_MSG_ERROR,
 			"Failed to init state transition to RESET.\n");
 	return ret_val;
+}
+
+MHI_STATUS process_M3_transition(mhi_device_ctxt *device,
+		mhi_state_work_item *cur_work_item)
+{
+	mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
+			"M3 state transition received 0x%x\n",
+			cur_work_item->new_state);
+	device->mhi_state = MHI_STATE_M3;
+	device->pending_M3 = 0;
+	device->m0_m3++;
+	wake_up(&device->M3_event->event);
+
+	return MHI_STATUS_SUCCESS;
 }

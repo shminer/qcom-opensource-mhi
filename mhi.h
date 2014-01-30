@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -16,6 +16,9 @@
 #include "mhi_macros.h"
 #include <linux/types.h>
 #include <asm/types.h>
+#include <linux/spinlock_types.h>
+#include <linux/hrtimer.h>
+#include <linux/pm.h>
 
 typedef struct osal_mutex osal_mutex;
 typedef struct osal_thread osal_thread;
@@ -23,8 +26,10 @@ typedef struct osal_spinlock osal_spinlock;
 typedef struct osal_event osal_event;
 typedef struct mhi_meminfo mhi_meminfo;
 typedef struct pci_dev pci_dev;
+typedef struct device device;
 typedef struct mhi_device_ctxt mhi_device_ctxt;
 typedef struct mhi_pcie_devices mhi_pcie_devices;
+typedef struct hrtimer hrtimer;
 extern mhi_pcie_devices mhi_devices;
 
 typedef struct pcie_core_info
@@ -36,6 +41,7 @@ typedef struct pcie_core_info
 	u64 bar0_end; /*<-- BAR 0 Base Address -->*/
 	u64 bar2_base; /*<-- BAR 0 Base Address -->*/
 	u64 bar2_end; /*<-- BAR 0 Base Address -->*/
+	u32 device_wake_gpio;
 
 }pcie_core_info;
 
@@ -383,13 +389,6 @@ typedef enum MHI_THREAD_STATE
 	MHI_THREAD_STATE_reserved = 0x80000000
 }MHI_THREAD_STATE;
 
-typedef struct msi_handle
-{
-	u32 msi_nr;
-	struct mhi_device_ctxt* mhi_dev_ctxt;
-	void (*osal_cb)(void*, u32);
-	void* osal_device;
-}msi_handle;
 
 typedef struct mhi_ring
 {
@@ -440,9 +439,9 @@ typedef enum MHI_INIT_ERROR_STAGE
 
 typedef enum MHI_STATE_TRANSITION
 {
-	STATE_TRANSITION_RESET = 0x7, //TODO this should be 0
+	STATE_TRANSITION_RESET = 0x0,
 	STATE_TRANSITION_READY = 0x1,
-	STATE_TRANSITION_M0 = 0x0, //TODO this should be 2
+	STATE_TRANSITION_M0 = 0x2,
 	STATE_TRANSITION_M1 = 0x3,
 	STATE_TRANSITION_M2 = 0x4,
 	STATE_TRANSITION_M3 = 0x5,
@@ -532,10 +531,8 @@ struct mhi_device_ctxt
 	u64 nr_of_ec;
 	u64 nr_of_cmdc;
 	MHI_STATE mhi_state;
-	MHI_STATE mhi_device_state;
 	volatile uintptr_t mmio_addr;
 	volatile u64 mmio_len;
-	msi_handle mhi_msi_handle;
 	mhi_ring mhi_local_chan_ctxt[MHI_MAX_CHANNELS];
 	mhi_ring mhi_local_event_ctxt[MHI_MAX_CHANNELS];
 	mhi_ring mhi_local_cmd_ctxt[NR_OF_CMD_RINGS];
@@ -548,6 +545,11 @@ struct mhi_device_ctxt
 	osal_event* event_handle;
 	osal_event* state_change_event_handle;
 	osal_event* M0_event;
+	osal_event* M3_event;
+	osal_event *mhi_xfer_stop;
+	u32	    pending_M3;
+	atomic_t mhi_chan_db_order[MHI_MAX_CHANNELS];
+	osal_spinlock *db_write_lock;
 
 	MHI_THREAD_STATE event_thread_state;
 	MHI_THREAD_STATE state_change_thread_state;
@@ -564,7 +566,16 @@ struct mhi_device_ctxt
 	u32 ev_ring_props[EVENT_RINGS_ALLOCATED];
 	u32 hw_intmod_rate;
 	u32 outbound_evmod_rate;
-	MHI_DEVICE_STATE	device_state;
+	u32 m0_m1;
+	u32 m1_m0;
+	u32 m1_m2;
+	u32 m2_m0;
+	u32 m0_m3;
+	u32 m3_m0;
+
+	rwlock_t xfer_lock;
+	hrtimer inactivity_tmr;
+	ktime_t inactivity_timeout;
 #ifdef MHI_DEBUG
 	mhi_counters mhi_chan_cntr[MHI_MAX_CHANNELS];
 	u32 ev_counter[EVENT_RINGS_ALLOCATED];
@@ -673,13 +684,18 @@ MHI_STATUS parse_inbound(mhi_device_ctxt *device, u32 chan,
 
 int mhi_state_change_thread(void* ctxt);
 MHI_STATUS mhi_init_state_change_thread_work_queue(mhi_state_work_queue* q);
-MHI_STATUS mhi_init_state_transition(mhi_device_ctxt *mhi_device, MHI_STATE_TRANSITION new_state);
-MHI_STATUS mhi_set_state_of_all_channels(mhi_device_ctxt* mhi_device, MHI_CHAN_STATE new_state);
+MHI_STATUS mhi_init_state_transition(mhi_device_ctxt *mhi_device,
+					MHI_STATE_TRANSITION new_state);
+MHI_STATUS mhi_set_state_of_all_channels(mhi_device_ctxt* mhi_device,
+					MHI_CHAN_STATE new_state);
+void ring_all_chan_dbs(mhi_device_ctxt* device);
 MHI_STATUS process_stt_work_item(mhi_device_ctxt  *device,
 			mhi_state_work_item* cur_work_item);
 MHI_STATUS process_M0_transition(mhi_device_ctxt  *device,
 			mhi_state_work_item *cur_work_item);
 MHI_STATUS process_M1_transition(mhi_device_ctxt  *device,
+			mhi_state_work_item *cur_work_item);
+MHI_STATUS process_M3_transition(mhi_device_ctxt  *device,
 			mhi_state_work_item *cur_work_item);
 MHI_STATUS process_READY_transition(mhi_device_ctxt *device,
 			mhi_state_work_item *cur_work_item);
@@ -690,17 +706,32 @@ MHI_STATUS process_SYSERR_transition(mhi_device_ctxt *device,
 MHI_STATUS process_BHI_transition(mhi_device_ctxt *device,
 			mhi_state_work_item *cur_work_item);
 
+MHI_STATUS mhi_initiate_M3(mhi_device_ctxt *mhi_dev_ctxt);
+MHI_STATUS mhi_initiate_M0(mhi_device_ctxt *mhi_dev_ctxt);
+enum hrtimer_restart mhi_initiate_M1(struct hrtimer *timer);
+int mhi_suspend(struct pci_dev *dev, pm_message_t state);
+int mhi_resume(struct pci_dev *dev);
 MHI_STATUS probe_clients(mhi_device_ctxt *device);
 int rmnet_mhi_probe(struct pci_dev *dev);
 int mhi_shim_probe(struct pci_dev* dev);
+int mhi_init_pcie_device (mhi_pcie_dev_info *mhi_pcie_dev);
+int mhi_init_gpios(mhi_pcie_dev_info *mhi_pcie_dev);
+int mhi_init_pm_sysfs(struct device *dev);
+MHI_STATUS mhi_init_timers(mhi_device_ctxt *device);
+typedef enum MHI_DEBUG_CLASS
+{
+	MHI_DBG_DATA = 0x1000,
+	MHI_DBG_POWER = 0x2000,
+	MHI_DBG_reserved = 0x80000000
+}MHI_DEBUG_CLASS;
 typedef enum MHI_DEBUG_LEVEL
 {
 	MHI_MSG_VERBOSE = 0x0,
-	MHI_MSG_INFO = 0x1,
-	MHI_MSG_DBG = 0x2,
-	MHI_MSG_WARNING = 0x3,
-	MHI_MSG_ERROR = 0x4,
-	MHI_MSG_CRITICAL = 0x5,
+	MHI_MSG_INFO = 0x2,
+	MHI_MSG_DBG = 0x4,
+	MHI_MSG_WARNING = 0x8,
+	MHI_MSG_ERROR = 0x10,
+	MHI_MSG_CRITICAL = 0x20,
 	MHI_MSG_reserved = 0x80000000
 }MHI_DEBUG_LEVEL;
 
