@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -48,8 +48,11 @@
 #define MHI_DATA_SEG_WINDOW_START_ADDR 0x0ULL
 #define MHI_DATA_SEG_WINDOW_END_ADDR 0x3E800000ULL /* ~1GB*/
 
-#define MHI_MAX_TIMEOUT_MS	 20000
+#define MHI_MAX_TIMEOUT_MS	 20000UL
+#define MHI_M1_ENTRY_DELAY_MS	 3000
 
+/* MHI GPIOs */
+#define MHI_DEVICE_WAKE_GPIO 108
 /* PCIe Device Info */
 
 #define MHI_PCIE_DEVICE_BAR0_OFFSET_LOW (16)
@@ -62,24 +65,17 @@
 		( (MHI_CLIENT_CHANNEL)(_CHAN_NR) < \
 		 MHI_CLIENT_RESERVED_2_LOWER))	 \
 
-#define IS_SOFTWARE_CHANNEL(_CHAN_NR) (((MHI_CLIENT_CHANNEL)(_CHAN_NR) >=\
-			0) &&			 \
-		((MHI_CLIENT_CHANNEL)(_CHAN_NR) < \
-		 MHI_CLIENT_RESERVED_1_LOWER))
+#define IS_SOFTWARE_CHANNEL(_CHAN_NR) (((MHI_CLIENT_CHANNEL)(_CHAN_NR) >= 0) && \
+					((MHI_CLIENT_CHANNEL)(_CHAN_NR) < \
+					 MHI_CLIENT_RESERVED_1_LOWER))
 
-/*
-#define IS_SOFTWARE_CHANNEL(_CHAN_NR) (((MHI_CLIENT_CHANNEL)(_CHAN_NR) > MHI_CLIENT_RESERVED_1_UPPER) &&\
-( (MHI_CLIENT_CHANNEL)(_CHAN_NR) < MHI_CLIENT_RESERVED_2_LOWER))
-
-#define IS_HARDWARE_CHANNEL(_CHAN_NR) (((MHI_CLIENT_CHANNEL)(_CHAN_NR) >= 0) &&			 \
-((MHI_CLIENT_CHANNEL)(_CHAN_NR) < MHI_CLIENT_RESERVED_1_LOWER))
-
-*/
-#define VALID_CHAN_NR(_CHAN_NR) (IS_HARDWARE_CHANNEL(_CHAN_NR) || IS_SOFTWARE_CHANNEL(_CHAN_NR))
+#define VALID_CHAN_NR(_CHAN_NR) (IS_HARDWARE_CHANNEL(_CHAN_NR) || \
+				IS_SOFTWARE_CHANNEL(_CHAN_NR))
 
 #define VALID_BUF(_BUF_ADDR,_BUF_LEN) (((uintptr_t)(_BUF_ADDR)>= MHI_DATA_SEG_WINDOW_START_ADDR) && \
 		(((uintptr_t)(_BUF_ADDR) + (uintptr_t)(_BUF_LEN) <	 \
 		 MHI_DATA_SEG_WINDOW_END_ADDR)))
+
 #define MHI_HW_INTMOD_VAL_MS  2
 /* Timeout Values */
 #define MHI_READY_STATUS_TIMEOUT_MS 10000

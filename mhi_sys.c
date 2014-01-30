@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -12,10 +12,117 @@
 
 #include "mhi_sys.h"
 MHI_DEBUG_LEVEL mhi_msg_lvl = MHI_MSG_CRITICAL;
+MHI_DEBUG_CLASS mhi_msg_class = MHI_DBG_DATA | MHI_DBG_POWER;
 
 module_param(mhi_msg_lvl , uint, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(mhi_msg_lvl, "dbg lvl");
 
+module_param(mhi_msg_class , uint, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(mhi_msg_class, "dbg class");
+
+static ssize_t mhi_dbgfs_chan_read(struct file *fp, char __user *buf,
+				size_t count, loff_t *offp);
+static ssize_t mhi_dbgfs_state_read(struct file *fp, char __user *buf,
+				size_t count, loff_t *offp);
+
+static const struct file_operations mhi_dbgfs_chan_fops = {
+.read = mhi_dbgfs_chan_read,
+.write = NULL,
+};
+
+static const struct file_operations mhi_dbgfs_state_fops = {
+.read = mhi_dbgfs_state_read,
+.write = NULL,
+};
+
+static char chan_info[0x1000];
+int mhi_init_debugfs(mhi_device_ctxt* mhi_dev_ctxt)
+{
+	struct dentry *mhi_parent_folder;
+	struct dentry *mhi_chan_stats;
+	struct dentry *mhi_state_stats;
+	mhi_parent_folder = debugfs_create_dir("mhi", NULL);
+	if (NULL == mhi_parent_folder)
+	{
+		mhi_log(MHI_MSG_INFO, "Failed to create debugfs parent dir.\n");
+		return -1;
+	}
+	mhi_chan_stats = debugfs_create_file("mhi_chan_stats",
+					0444,
+					mhi_parent_folder,
+					mhi_dev_ctxt,
+					&mhi_dbgfs_chan_fops);
+	mhi_state_stats = debugfs_create_file("mhi_state_stats",
+					0444,
+					mhi_parent_folder,
+					mhi_dev_ctxt,
+					&mhi_dbgfs_state_fops);
+	return 0;
+}
+static ssize_t mhi_dbgfs_state_read(struct file *fp, char __user *buf,
+				size_t count, loff_t *offp)
+{
+	int amnt_copied = 0;
+	mhi_device_ctxt *mhi_dev_ctxt = mhi_devices.device_list[0].mhi_ctxt;
+	if (NULL == mhi_dev_ctxt)
+		return -EIO;
+	amnt_copied =
+	scnprintf(chan_info,
+			sizeof(chan_info),
+			"%s %d %s %d %s %d %s %d %s %d %s %d\n",
+			"M0->M1:",
+			mhi_dev_ctxt->m0_m1,
+			"M0<-M1:",
+			mhi_dev_ctxt->m1_m0,
+			"M1->M2:",
+			mhi_dev_ctxt->m1_m2,
+			"M0<-M2:",
+			mhi_dev_ctxt->m2_m0,
+			"M0->M3:",
+			mhi_dev_ctxt->m0_m3,
+			"M0<-M3:",
+			mhi_dev_ctxt->m3_m0);
+	if (amnt_copied < count)
+		return amnt_copied - copy_to_user(buf, chan_info, amnt_copied);
+	else
+		return -ENOMEM;
+}
+
+static ssize_t mhi_dbgfs_chan_read(struct file *fp, char __user *buf,
+				size_t count, loff_t *offp)
+{
+	int amnt_copied = 0;
+	mhi_device_ctxt *mhi_dev_ctxt = mhi_devices.device_list[0].mhi_ctxt;
+	if (NULL == mhi_dev_ctxt)
+		return -EIO;
+	*offp = (u32)(*offp) % MHI_MAX_CHANNELS;
+	amnt_copied =
+	scnprintf(chan_info,
+		sizeof(chan_info),
+		"%s0x%x %s %d %s %d %s 0x%x %s 0x%llx %s %p %s %p %s %p",
+		"chan:",
+		(unsigned int)*offp,
+		"pkts to dev:",
+		mhi_dev_ctxt->mhi_chan_cntr[*offp].pkts_to_dev,
+		"pkts from dev:",
+		mhi_dev_ctxt->mhi_chan_cntr[*offp].pkts_from_dev,
+		"chan_state:",
+		mhi_dev_ctxt->mhi_ctrl_seg->mhi_cc_list[*offp].mhi_chan_state,
+		"chan_base phy:",
+		mhi_dev_ctxt->mhi_ctrl_seg->mhi_cc_list[*offp].mhi_trb_ring_base_addr,
+		"chan_base virt:",
+		mhi_dev_ctxt->mhi_local_chan_ctxt[*offp].base,
+		"chan_wp virt:",
+		mhi_dev_ctxt->mhi_local_chan_ctxt[*offp].wp,
+		"chan_rp virt:",
+		mhi_dev_ctxt->mhi_local_chan_ctxt[*offp].rp);
+	*offp += 1;
+
+	if (amnt_copied < count)
+		return amnt_copied - copy_to_user(buf, chan_info, amnt_copied);
+	else
+		return -ENOMEM;
+}
 inline uintptr_t mhi_p2v_addr(mhi_meminfo *meminfo, uintptr_t pa)
 {
 	return meminfo->va_aligned + (pa - meminfo->pa_aligned);
@@ -58,11 +165,11 @@ MHI_STATUS mhi_init_event(osal_event *handle)
 void *mhi_malloc(size_t buf_size)
 {
 	/* This is a virtual malloc, we don't need physical contiguity */
-	return vmalloc(buf_size);
+	return kmalloc(buf_size, GFP_KERNEL);
 }
 void mhi_free(void *data)
 {
-	vfree(data);
+	kfree(data);
 }
 void mhi_memset(void *ptr, int value, size_t num)
 {

@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -10,15 +10,6 @@
  * GNU General Public License for more details.
  */
 
-#include <linux/module.h>
-#include <linux/miscdevice.h>
-#include <linux/kernel.h>
-#include <linux/pci.h>
-#include <linux/completion.h>
-#include <linux/fs.h>
-#include <linux/platform_device.h>
-#include <linux/jiffies.h>
-#include <linux/sysfs.h>
 
 /* MHI Includes */
 #include "mhi_sys.h"
@@ -51,14 +42,14 @@ static const struct pci_device_id mhi_pcie_device_id[] =
 
 /* Publicize the existance of this device to userspace */
 MODULE_DEVICE_TABLE(pci,mhi_pcie_device_id);
-static struct pci_driver mhi_pcie_driver =
+struct pci_driver mhi_pcie_driver =
 {
 	.name = "mhi_driver",
 	.id_table = mhi_pcie_device_id,
 	.probe = mhi_probe,
 	.remove = mhi_remove,
-	.suspend = NULL,
-	.resume = NULL,
+	.suspend = mhi_suspend,
+	.resume = mhi_resume,
 };
 
 int mhi_probe(struct pci_dev* pcie_device,
@@ -75,7 +66,7 @@ int mhi_probe(struct pci_dev* pcie_device,
 	if (mhi_devices.nr_of_devices + 1 > MHI_MAX_SUPPORTED_DEVICES)
 	{
 		mhi_log(MHI_MSG_ERROR,"Error: Too many devices\n");
-		goto mhi_pcie_read_ep_config_err;
+		return -1;
 	}
 
 	mhi_devices.nr_of_devices++;
@@ -89,7 +80,6 @@ int mhi_probe(struct pci_dev* pcie_device,
 		mhi_log(MHI_MSG_ERROR,"Failed to spawn deferred probe thread\n");
 	}
 
-mhi_pcie_read_ep_config_err:
 	return ret_val;
 }
 static void mhi_remove(struct pci_dev* mhi_device)
@@ -125,101 +115,60 @@ static int mhi_startup_thread(void* ctxt)
 	int ret_val			 = 0;
 	mhi_pcie_dev_info* mhi_pcie_dev = (mhi_pcie_dev_info*)ctxt;
 	struct pci_dev* pcie_device = (struct pci_dev*)mhi_pcie_dev->pcie_device;
-	long int sleep_time = 100000;
-	u32 j = 0;
 
 	if (NULL == ctxt)
 		return -1;
 
-	mhi_log(MHI_MSG_INFO, "Entering deferred probe.\n");
+	ret_val = mhi_init_pcie_device(mhi_pcie_dev);
 
-	/* Enable the device */
-	do {
-		if (0 != (ret_val = pci_enable_device(mhi_pcie_dev->pcie_device))) {
-			mhi_log(MHI_MSG_ERROR, 
-				"Failed to enable pcie device ret_val=%d\n", ret_val);
-			mhi_log(MHI_MSG_ERROR,
-				"Sleeping for ~ %li uS, and retrying.\n", sleep_time);
-			usleep(sleep_time);
-		}
-	} while(ret_val != 0);
-
-	mhi_log(MHI_MSG_INFO,"Successfully enabled pcie device.\n" );
-
-	mhi_pcie_dev->core.bar0_base = (uintptr_t)ioremap_nocache(pci_resource_start(pcie_device,0),
-			pci_resource_len(pcie_device,0));
-	mhi_pcie_dev->core.bar0_end = mhi_pcie_dev->core.bar0_base +
-		pci_resource_len(pcie_device,0);
-	mhi_pcie_dev->core.bar2_base = (uintptr_t)ioremap_nocache(pci_resource_start(pcie_device,2),
-			pci_resource_len(pcie_device,2));
-	mhi_pcie_dev->core.bar2_end = mhi_pcie_dev->core.bar2_base +
-		pci_resource_len(pcie_device,2);
-
-	if (0 == mhi_pcie_dev->core.bar0_base)
+	if (0 != ret_val)
 	{
-		mhi_log(MHI_MSG_ERROR,"Failed to register for pcie resources\n");
-		goto mhi_pcie_read_ep_config_err;
+		mhi_log(MHI_MSG_CRITICAL,
+			"Failed to initialize pcie device, ret %d\n",
+			ret_val);
 	}
-
-	mhi_log(MHI_MSG_INFO,"Device BAR0 address is at 0x%llx\n",
-			mhi_pcie_dev->core.bar0_base);
-
-	if (0 != (ret_val = pci_request_region(pcie_device,0, mhi_pcie_driver.name)))
-	{
-		mhi_log(MHI_MSG_ERROR, "Could not request BAR0 region\n");
-		goto mhi_pcie_read_ep_config_err;
-	}
-
-	mhi_pcie_dev->core.manufact_id = pcie_device->vendor;
-	mhi_pcie_dev->core.dev_id = pcie_device->device;
-
-	if (mhi_pcie_dev->core.manufact_id != MHI_PCIE_VENDOR_ID ||
-			mhi_pcie_dev->core.dev_id != MHI_PCIE_DEVICE_ID)
-	{
-		mhi_log(MHI_MSG_ERROR,"Incorrect device/manufacturer ID\n");
-		goto mhi_pcie_read_ep_config_err;
-	}
-
-
-	/* We need to ensure that the link is stable before we kick off MHI */
-	j = 0;
-	while ( 0xFFFFffff == pcie_read(mhi_pcie_dev->core.bar0_base , MHIREGLEN)
-			&& j <= MHI_MAX_LINK_RETRIES)
-	{
-		mhi_log(MHI_MSG_ERROR, "LINK INSTABILITY DETECTED, retry %d\n",j);
-		msleep(MHI_LINK_STABILITY_WAIT_MS);
-		if (MHI_MAX_LINK_RETRIES == j)
-		{
-			ret_val = -EIO;
-			mhi_log(MHI_MSG_ERROR, "LINK INSTABILITY DETECTED, FAILING!\n");
-			goto mhi_device_list_error;
-		}
-		j++;
-	}
-	if (MHI_STATUS_SUCCESS != (ret_val = mhi_init_device_ctxt(mhi_pcie_dev,
-					&mhi_pcie_dev->mhi_ctxt)))
-		goto mhi_device_list_error;
+	ret_val = mhi_init_device_ctxt(mhi_pcie_dev,
+					&mhi_pcie_dev->mhi_ctxt);
+	if (MHI_STATUS_SUCCESS != ret_val)
+		goto msi_config_err;
 
 	/* Register for MSI */
 	if (0 != (ret_val = pci_enable_msi(pcie_device)))
 	{
 		mhi_log(MHI_MSG_ERROR, "Failed to enable MSIs for pcie dev.\n");
-		goto mhi_pcie_read_ep_config_err;
+		goto msi_config_err;
 	}
-
-	if (0!= (ret_val = request_irq(pcie_device->irq, (irq_handler_t)irq_cb,
+	ret_val = request_irq(pcie_device->irq, (irq_handler_t)irq_cb,
 					IRQF_NO_SUSPEND,
 					"mhi_drv",
-					(void*)&pcie_device->dev)))
+					(void*)&pcie_device->dev);
+	if (0 != ret_val)
 	{
 		mhi_log(MHI_MSG_ERROR, "Failed to register handler for MSI.\n");
-		goto mhi_pcie_read_ep_config_err;
+		goto msi_config_err;
+	}
+	ret_val = mhi_init_gpios(mhi_pcie_dev);
+	if (0 != ret_val)
+	{
+		mhi_log(MHI_MSG_ERROR | MHI_DBG_POWER,
+			"Failed to register for GPIO.\n");
+		goto msi_config_err;
+	}
+	ret_val = mhi_init_pm_sysfs(&pcie_device->dev);
+	if (0 != ret_val)
+	{
+		mhi_log(MHI_MSG_ERROR, "Failed to setup sysfs.\n");
+		goto sysfs_config_err;
+	}
+	if (0 != mhi_init_debugfs(mhi_pcie_dev->mhi_ctxt))
+	{
+		mhi_log(MHI_MSG_ERROR, "Failed to init debugfs.\n");
 	}
 
 	pci_set_master(pcie_device);
 	mhi_pcie_dev->mhi_ctxt->mmio_addr = (mhi_pcie_dev->core.bar0_base);
 	pcie_device->dev.platform_data = (void*)&mhi_pcie_dev->mhi_ctxt;
-	
+
 
 #ifdef BHI_DISABLED
 	/* Fire off the state transition  thread */
@@ -239,22 +188,25 @@ static int mhi_startup_thread(void* ctxt)
 					STATE_TRANSITION_BHI);
 #endif
 
-
-	mhi_log(MHI_MSG_INFO, "Finished all driver probing returning ret_val %d.\n", ret_val);
+	mhi_log(MHI_MSG_INFO,
+			"Finished all driver probing returning ret_val %d.\n", ret_val);
 	return ret_val;
 
 mhi_state_transition_error:
 	if (MHI_STATUS_SUCCESS != mhi_clean_init_stage(mhi_pcie_dev->mhi_ctxt,
 				MHI_INIT_ERROR_STAGE_UNWIND_ALL))
 		mhi_log(MHI_MSG_ERROR, "Could not clean up context\n");
+sysfs_config_err:
+	gpio_free(MHI_DEVICE_WAKE_GPIO);
+msi_config_err:
 	pci_disable_msi(pcie_device);
-mhi_device_list_error:
 	pci_disable_device(pcie_device);
-mhi_pcie_read_ep_config_err:
 	return ret_val;
 }
 
-DECLARE_PCI_FIXUP_HEADER(MHI_PCIE_VENDOR_ID, MHI_PCIE_DEVICE_ID,mhi_msm_fixup);
+DECLARE_PCI_FIXUP_HEADER(MHI_PCIE_VENDOR_ID,
+			MHI_PCIE_DEVICE_ID,
+			mhi_msm_fixup);
 module_exit(mhi_exit);
 module_init(mhi_init);
 MODULE_LICENSE("GPL v2");
