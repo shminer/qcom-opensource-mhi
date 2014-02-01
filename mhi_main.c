@@ -425,8 +425,6 @@ MHI_STATUS parse_xfer_event(mhi_device_ctxt *ctxt, mhi_event_pkt *event)
 			result = &device->client_handle_list[chan]->result;
 			result->payload_buf = trb_data_loc;
 			result->bytes_xferd = xfer_len;
-			result->bytes_xferd = MHI_TX_TRB_GET_LEN(TX_TRB_LEN,
-								local_trb_loc);
 			result->transaction_status = MHI_STATUS_SUCCESS;
 			result->user_data =
 				device->client_handle_list[chan]->user_data;
