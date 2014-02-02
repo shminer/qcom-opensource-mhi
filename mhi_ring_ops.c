@@ -12,18 +12,17 @@
 #include "mhi.h"
 #include "mhi_sys.h"
 
-/**
-* @brief Returns a pointer to the next free location in
-* the ring for the calee to populate
-*	 and moves the write pointer of the ring.
-*
-*@param[in ]	ring_props	pointer to the ring
-*@param[in ]	element_size	size of the element to insert
-*@param[out]	assigned_addr	address returned to the calee
-*				for element population
-*@param[in ]	ring	location of local register set for the ring
-*/
-MHI_STATUS add_element(mhi_ring *ring, void **assigned_addr)
+inline MHI_STATUS ctxt_add_element(mhi_ring *ring, void **assigned_addr)
+{
+	return add_element(ring, &ring->rp, &ring->wp, assigned_addr);
+}
+inline MHI_STATUS ctxt_del_element(mhi_ring *ring, void **assigned_addr)
+{
+	return delete_element(ring, &ring->rp, &ring->wp, assigned_addr);
+}
+
+MHI_STATUS add_element(mhi_ring *ring, void * volatile *rp,
+			void * volatile *wp, void **assigned_addr)
 {
 	uintptr_t d_wp = 0, d_rp = 0, ring_size = 0;
 
@@ -33,13 +32,19 @@ MHI_STATUS add_element(mhi_ring *ring, void **assigned_addr)
 		return MHI_STATUS_ERROR;
 	}
 
-	d_wp = ((uintptr_t)ring->wp - (uintptr_t)ring->base)/ring->el_size;
-	d_rp = ((uintptr_t)ring->rp - (uintptr_t)ring->base)/ring->el_size;
+	if (MHI_STATUS_SUCCESS != get_element_index(ring, *rp, &d_rp)) {
+		mhi_log(MHI_MSG_CRITICAL, "Bad element index.\n");
+		return MHI_STATUS_ERROR;
+	}
+	if (MHI_STATUS_SUCCESS != get_element_index(ring, *wp, &d_wp)) {
+		mhi_log(MHI_MSG_CRITICAL, "Bad element index.\n");
+		return MHI_STATUS_ERROR;
+	}
 	ring_size = ring->len / ring->el_size;
 
 	if ((d_wp + 1) % ring_size == d_rp) {
 		if (ring->overwrite_en) {
-			delete_element(ring, NULL);
+			ctxt_del_element(ring, NULL);
 		} else {
 			mhi_log(MHI_MSG_INFO, "Ring 0x%lX is full\n",
 					(uintptr_t)ring->base);
@@ -48,7 +53,7 @@ MHI_STATUS add_element(mhi_ring *ring, void **assigned_addr)
 	}
 	if (NULL != assigned_addr)
 		*assigned_addr = (char *)ring->wp;
-	ring->wp = (void *)(((d_wp + 1) % ring_size) * ring->el_size +
+	*wp = (void *)(((d_wp + 1) % ring_size) * ring->el_size +
 						(uintptr_t)ring->base);
 	return MHI_STATUS_SUCCESS;
 }
@@ -60,7 +65,8 @@ MHI_STATUS add_element(mhi_ring *ring, void **assigned_addr)
 *@param[in ] ring location of local register set for the ring
 *@param[out] assigned_addr address returned to the calee with element
 */
-MHI_STATUS delete_element(mhi_ring *ring, void **assigned_addr)
+MHI_STATUS delete_element(mhi_ring *ring, void * volatile *rp,
+			void * volatile *wp, void **assigned_addr)
 {
 	uintptr_t d_wp = 0, d_rp = 0, ring_size = 0;
 
@@ -69,31 +75,29 @@ MHI_STATUS delete_element(mhi_ring *ring, void **assigned_addr)
 		mhi_log(MHI_MSG_ERROR, "Bad input parameters, quitting.\n");
 		return MHI_STATUS_ERROR;
 	}
-	d_wp = ((uintptr_t)ring->wp - (uintptr_t)ring->base) / ring->el_size;
-	d_rp = ((uintptr_t)ring->rp - (uintptr_t)ring->base) / ring->el_size;
 	ring_size = ring->len / ring->el_size;
 
+	if (MHI_STATUS_SUCCESS != get_element_index(ring, *rp, &d_rp)) {
+		mhi_log(MHI_MSG_CRITICAL, "Bad element index.\n");
+		return MHI_STATUS_ERROR;
+	}
+	if (MHI_STATUS_SUCCESS != get_element_index(ring, *wp, &d_wp)) {
+		mhi_log(MHI_MSG_CRITICAL, "Bad element index.\n");
+		return MHI_STATUS_ERROR;
+	}
 	if (d_wp == d_rp) {
-		mhi_log(MHI_MSG_INFO, "Ring 0x%lx is empty\n",
+		mhi_log(MHI_MSG_VERBOSE, "Ring 0x%lx is empty\n",
 				(uintptr_t)ring->base);
+		*assigned_addr = NULL;
 		return MHI_STATUS_RING_EMPTY;
 	}
 
 	if (NULL != assigned_addr)
 		*assigned_addr = (void *)ring->rp;
 
-	ring->rp = (void *)(((d_rp + 1) % ring_size) * ring->el_size +
+	*rp = (void *)(((d_rp + 1) % ring_size) * ring->el_size +
 						(uintptr_t)ring->base);
-	return MHI_STATUS_SUCCESS;
-}
 
-MHI_STATUS get_element_index(mhi_ring *ring, void *address, uintptr_t *index)
-{
-	/* 1. Check the bounds of this address to ensure it is in the ring.*/
-	if (MHI_STATUS_SUCCESS != validate_ring_el_addr(ring,
-							(uintptr_t)address))
-		return MHI_STATUS_ERROR;
-	*index = ((uintptr_t)address - (uintptr_t)ring->base) / ring->el_size;
 	return MHI_STATUS_SUCCESS;
 }
 
@@ -106,30 +110,67 @@ MHI_STATUS get_element_index(mhi_ring *ring, void *address, uintptr_t *index)
 int get_free_trbs(mhi_client_handle *client_handle)
 {
 	u32 chan = client_handle->chan;
+	u32 available_ring_els = 0;
 	mhi_device_ctxt *ctxt = client_handle->mhi_dev_ctxt;
-	return get_nr_avail_ring_elements(&ctxt->mhi_local_chan_ctxt[chan]);
+	available_ring_els =
+		get_nr_avail_ring_elements(&ctxt->mhi_local_chan_ctxt[chan]);
+	return	available_ring_els;
 }
 int get_nr_avail_ring_elements(mhi_ring *ring)
 {
-	uintptr_t d_wp = 0, d_rp = 0, ring_size = 0;
+	u32 nr_el = 0;
+	uintptr_t ring_size = 0;
+	ring_size = ring->len / ring->el_size;
+	get_nr_enclosed_el(ring, ring->rp, ring->wp, &nr_el);
+	return ring_size - nr_el - 1;
+}
 
+MHI_STATUS get_nr_enclosed_el(mhi_ring *ring, void *rp, void *wp, u32 *nr_el)
+{
+	uintptr_t index_rp = 0;
+	uintptr_t index_wp = 0;
+	uintptr_t ring_size = 0;
 	if (0 == ring->el_size || NULL == ring ||
-			NULL == ring->base || 0 == ring->len) {
+		NULL == ring->base || 0 == ring->len) {
 		mhi_log(MHI_MSG_ERROR, "Bad input parameters, quitting.\n");
 		return MHI_STATUS_ERROR;
 	}
+	if (MHI_STATUS_SUCCESS != get_element_index(ring, rp, &index_rp)) {
+		mhi_log(MHI_MSG_CRITICAL, "Bad element index.\n");
+		return MHI_STATUS_ERROR;
+	}
 
-	d_wp = ((uintptr_t)ring->wp - (uintptr_t)ring->base) / ring->el_size;
-	d_rp = ((uintptr_t)ring->rp - (uintptr_t)ring->base) / ring->el_size;
+	if (MHI_STATUS_SUCCESS != get_element_index(ring, wp, &index_wp)) {
+		mhi_log(MHI_MSG_CRITICAL, "Bad element index.\n");
+		return MHI_STATUS_ERROR;
+	}
 	ring_size = ring->len / ring->el_size;
 
-	if ((d_wp + 1) % ring_size == d_rp) { /* Ring full */
+	if (index_rp < index_wp)
+		*nr_el = index_wp - index_rp;
+	else if (index_rp > index_wp)
+		*nr_el = ring_size - (index_rp - index_wp);
+	else
+		*nr_el = 0;
+	return MHI_STATUS_SUCCESS;
+}
 
-		return 0;
-	} else {
-		if (d_wp < d_rp)
-			return d_rp - d_wp - 1;
-		else
-			return ring_size - (d_wp - d_rp) - 1;
-	}
+MHI_STATUS get_element_index(mhi_ring *ring, void *address, uintptr_t *index)
+{
+	if (MHI_STATUS_SUCCESS != validate_ring_el_addr(ring,
+							(uintptr_t)address))
+		return MHI_STATUS_ERROR;
+	*index = ((uintptr_t)address - (uintptr_t)ring->base) / ring->el_size;
+	return MHI_STATUS_SUCCESS;
+}
+
+MHI_STATUS get_element_addr(mhi_ring *ring, uintptr_t index, void **address)
+{
+	uintptr_t ring_size = 0;
+	if (NULL == ring || NULL == address)
+		return MHI_STATUS_ERROR;
+	ring_size = ring->len / ring->el_size;
+	*address = (void *)((uintptr_t)ring->base +
+			(index % ring_size) * ring->el_size);
+	return MHI_STATUS_SUCCESS;
 }
