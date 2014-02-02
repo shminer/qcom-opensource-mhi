@@ -13,17 +13,18 @@
 #include "mhi_sys.h"
 #include "mhi_hwio.h"
 
-MHI_STATUS mhi_clean_init_stage(mhi_device_ctxt *device,
+MHI_STATUS mhi_clean_init_stage(mhi_device_ctxt *mhi_dev_ctxt,
 		MHI_INIT_ERROR_STAGE cleanup_stage)
 {
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
 	switch (cleanup_stage) {
 		u32 wait_counter = 0;
 	case MHI_INIT_ERROR_STAGE_UNWIND_ALL:
-		device->kill_threads = 1;
-		while (MHI_THREAD_STATE_EXIT != device->event_thread_state &&
+		mhi_dev_ctxt->kill_threads = 1;
+		while (MHI_THREAD_STATE_EXIT !=
+				mhi_dev_ctxt->event_thread_state &&
 				MHI_THREAD_STATE_EXIT !=
-				device->state_change_thread_state &&
+				mhi_dev_ctxt->state_change_thread_state &&
 				wait_counter <  MHI_MAX_LINK_RETRIES) {
 			usleep(1000);
 			wait_counter++;
@@ -31,22 +32,22 @@ MHI_STATUS mhi_clean_init_stage(mhi_device_ctxt *device,
 		if (wait_counter == MHI_MAX_LINK_RETRIES)
 			mhi_log(MHI_MSG_ERROR, "Failed to stop threads\n");
 	case MHI_INIT_ERROR_STAGE_DEVICE_CTRL:
-		mhi_freememregion(device->mhi_ctrl_seg_info);
+		mhi_freememregion(mhi_dev_ctxt->mhi_ctrl_seg_info);
 	case MHI_INIT_ERROR_STAGE_THREAD_QUEUES:
-		mhi_free(device->state_change_thread_handle);
-		mhi_free(device->event_thread_handle);
+		kfree(mhi_dev_ctxt->state_change_thread_handle);
+		kfree(mhi_dev_ctxt->event_thread_handle);
 	case MHI_INIT_ERROR_STAGE_THREADS:
-		mhi_free(device->event_handle);
-		mhi_free(device->state_change_event_handle);
-		mhi_free(device->M0_event);
+		kfree(mhi_dev_ctxt->event_handle);
+		kfree(mhi_dev_ctxt->state_change_event_handle);
+		kfree(mhi_dev_ctxt->M0_event);
 	case MHI_INIT_ERROR_STAGE_EVENTS:
-		mhi_free(device->mhi_ctrl_seg_info);
+		kfree(mhi_dev_ctxt->mhi_ctrl_seg_info);
 	case MHI_INIT_ERROR_STAGE_MEM_ZONES:
-		mhi_free(device->mhi_cmd_mutex_list);
-		mhi_free(device->mhi_chan_mutex);
-		mhi_free(device->mhi_ev_spinlock_list);
+		kfree(mhi_dev_ctxt->mhi_cmd_mutex_list);
+		kfree(mhi_dev_ctxt->mhi_chan_mutex);
+		kfree(mhi_dev_ctxt->mhi_ev_spinlock_list);
 	case MHI_INIT_ERROR_STAGE_SYNC:
-		mhi_free(device);
+		kfree(mhi_dev_ctxt);
 		break;
 	default:
 		ret_val = MHI_STATUS_ERROR;
@@ -143,10 +144,10 @@ MHI_STATUS mhi_init_device_ctxt(mhi_pcie_dev_info *dev_info,
  */
 MHI_STATUS mhi_create_ctxt(mhi_device_ctxt **mhi_device)
 {
-	*mhi_device = mhi_malloc(sizeof(mhi_device_ctxt));
+	*mhi_device = kmalloc(sizeof(mhi_device_ctxt), GFP_KERNEL);
 	if (NULL == *mhi_device)
 		return MHI_STATUS_ALLOC_ERROR;
-	mhi_memset(*mhi_device, 0, sizeof(mhi_device_ctxt));
+	memset(*mhi_device, 0, sizeof(mhi_device_ctxt));
 	(*mhi_device)->mhi_state = MHI_STATE_RESET;
 	(*mhi_device)->nr_of_cc = MHI_MAX_CHANNELS;
 	(*mhi_device)->nr_of_ec = EVENT_RINGS_ALLOCATED;
@@ -167,54 +168,63 @@ MHI_STATUS mhi_create_ctxt(mhi_device_ctxt **mhi_device)
 	MHI_SET_EVENT_RING_INFO(EVENT_RING_POLLING,
 			(*mhi_device)->ev_ring_props[TERTIARY_EVENT_RING],
 			MHI_EVENT_POLLING_DISABLED);
-	(*mhi_device)->hw_intmod_rate = (MAX_NR_TRBS_PER_HARD_CHAN-1) / 2;
+	MHI_SET_EVENT_RING_INFO(EVENT_RING_MSI_VEC,
+				(*mhi_device)->ev_ring_props[PRIMARY_EVENT_RING],
+				0);
+	MHI_SET_EVENT_RING_INFO(EVENT_RING_MSI_VEC,
+				(*mhi_device)->ev_ring_props[SECONDARY_EVENT_RING],
+				0);
+	MHI_SET_EVENT_RING_INFO(EVENT_RING_MSI_VEC,
+				(*mhi_device)->ev_ring_props[TERTIARY_EVENT_RING],
+				1);
 	return MHI_STATUS_SUCCESS;
 }
 /**
  * @brief Initialize all mutexes and spinlocks used by mhi
  *
- * @param device [IN ] mhi device context
+ * @param mhi_dev_ctxt [IN ] mhi mhi_dev_ctxt context
  *
  * @return MHI_STATUS
  */
-MHI_STATUS mhi_init_sync(mhi_device_ctxt *device)
+MHI_STATUS mhi_init_sync(mhi_device_ctxt *mhi_dev_ctxt)
 {
 	u32 i = 0;
 
-	device->mhi_ev_spinlock_list = mhi_malloc(sizeof(osal_spinlock) *
-							MHI_MAX_CHANNELS);
-	if (NULL == device->mhi_ev_spinlock_list)
+	mhi_dev_ctxt->mhi_ev_spinlock_list = kmalloc(sizeof(spinlock_t) *
+							MHI_MAX_CHANNELS,
+							GFP_KERNEL);
+	if (NULL == mhi_dev_ctxt->mhi_ev_spinlock_list)
 		goto ev_mutex_free;
-	device->mhi_chan_mutex = mhi_malloc(sizeof(osal_mutex) *
-							MHI_MAX_CHANNELS);
-	if (NULL == device->mhi_chan_mutex)
+	mhi_dev_ctxt->mhi_chan_mutex = kmalloc(sizeof(struct mutex) *
+						MHI_MAX_CHANNELS, GFP_KERNEL);
+	if (NULL == mhi_dev_ctxt->mhi_chan_mutex)
 		goto chan_mutex_free;
-	device->mhi_cmd_mutex_list = mhi_malloc(sizeof(osal_mutex) *
-							NR_OF_CMD_RINGS);
-	if (NULL == device->mhi_cmd_mutex_list)
+	mhi_dev_ctxt->mhi_cmd_mutex_list = kmalloc(sizeof(struct mutex) *
+						NR_OF_CMD_RINGS, GFP_KERNEL);
+	if (NULL == mhi_dev_ctxt->mhi_cmd_mutex_list)
 		goto cmd_mutex_free;
 
-	device->db_write_lock = mhi_malloc(sizeof(osal_spinlock) *
-							MHI_MAX_CHANNELS);
-	if (NULL == device->db_write_lock)
+	mhi_dev_ctxt->db_write_lock = kmalloc(sizeof(spinlock_t) *
+						MHI_MAX_CHANNELS, GFP_KERNEL);
+	if (NULL == mhi_dev_ctxt->db_write_lock)
 		goto db_write_lock_free;
-	for (i = 0; i < device->nr_of_cc; ++i)
-		mhi_init_mutex(&device->mhi_chan_mutex[i]);
+	for (i = 0; i < mhi_dev_ctxt->nr_of_cc; ++i)
+		mutex_init(&mhi_dev_ctxt->mhi_chan_mutex[i]);
 	for (i = 0; i < MHI_MAX_CHANNELS; ++i)
-		mhi_init_spinlock(&device->mhi_ev_spinlock_list[i]);
-	for (i = 0; i < device->nr_of_cmdc; ++i)
-		mhi_init_mutex(&device->mhi_cmd_mutex_list[i]);
+		spin_lock_init(&mhi_dev_ctxt->mhi_ev_spinlock_list[i]);
+	for (i = 0; i < mhi_dev_ctxt->nr_of_cmdc; ++i)
+		mutex_init(&mhi_dev_ctxt->mhi_cmd_mutex_list[i]);
 	for (i = 0; i < MHI_MAX_CHANNELS; ++i)
-		mhi_init_spinlock(&device->db_write_lock[i]);
-	rwlock_init(&device->xfer_lock);
+		spin_lock_init(&mhi_dev_ctxt->db_write_lock[i]);
+	rwlock_init(&mhi_dev_ctxt->xfer_lock);
 	return MHI_STATUS_SUCCESS;
 
 db_write_lock_free:
-	mhi_free(device->mhi_cmd_mutex_list);
+	kfree(mhi_dev_ctxt->mhi_cmd_mutex_list);
 cmd_mutex_free:
-	mhi_free(device->mhi_chan_mutex);
+	kfree(mhi_dev_ctxt->mhi_chan_mutex);
 chan_mutex_free:
-	mhi_free(device->mhi_ev_spinlock_list);
+	kfree(mhi_dev_ctxt->mhi_ev_spinlock_list);
 ev_mutex_free:
 	return MHI_STATUS_ALLOC_ERROR;
 }
@@ -224,36 +234,39 @@ ev_mutex_free:
  *	 mapping of mhi control and data segments.
  *
  *
- * @param device [IN ] mhi device context
+ * @param mhi_dev_ctxt [IN ] mhi mhi_dev_ctxt context
  *
  * @return MHI_STATUS
  */
 MHI_STATUS mhi_init_ctrl_zone(mhi_pcie_dev_info *dev_info,
-				mhi_device_ctxt *device)
+				mhi_device_ctxt *mhi_dev_ctxt)
 {
-	device->mhi_ctrl_seg_info = mhi_malloc(sizeof(mhi_meminfo));
-	if (NULL == device->mhi_ctrl_seg_info)
+	mhi_dev_ctxt->mhi_ctrl_seg_info = kmalloc(sizeof(mhi_meminfo),
+							GFP_KERNEL);
+	if (NULL == mhi_dev_ctxt->mhi_ctrl_seg_info)
 		return MHI_STATUS_ALLOC_ERROR;
-	device->mhi_ctrl_seg_info->dev = &dev_info->pcie_device->dev;
+	mhi_dev_ctxt->mhi_ctrl_seg_info->dev = &dev_info->pcie_device->dev;
 	return MHI_STATUS_SUCCESS;
 }
 
 /**
  * @brief Initialize all mhi threads
  *
- * @param device [IN ] mhi device context
+ * @param mhi_dev_ctxt [IN ] mhi mhi_dev_ctxt context
  *
  * @return MHI_STATUS
  */
-MHI_STATUS mhi_init_threads(mhi_device_ctxt *device)
+MHI_STATUS mhi_init_threads(mhi_device_ctxt *mhi_dev_ctxt)
 {
-	device->event_thread_handle = mhi_malloc(sizeof(osal_thread));
-	if (NULL == device->event_thread_handle) {
+	mhi_dev_ctxt->event_thread_handle = kmalloc(sizeof(osal_thread),
+							GFP_KERNEL);
+	if (NULL == mhi_dev_ctxt->event_thread_handle) {
 		mhi_log(MHI_MSG_ERROR, "Failed to init rx thread handle");
 		return MHI_STATUS_ERROR;
 	}
-	device->state_change_thread_handle = mhi_malloc(sizeof(osal_thread));
-	if (NULL == device->state_change_thread_handle) {
+	mhi_dev_ctxt->state_change_thread_handle = kmalloc(sizeof(osal_thread),
+								GFP_KERNEL);
+	if (NULL == mhi_dev_ctxt->state_change_thread_handle) {
 		mhi_log(MHI_MSG_ERROR, "Failed to init STT handle");
 		goto error_state_change_thread_handle_alloc;
 	}
@@ -261,33 +274,33 @@ MHI_STATUS mhi_init_threads(mhi_device_ctxt *device)
 	return MHI_STATUS_SUCCESS;
 
 error_state_change_thread_handle_alloc:
-	mhi_free(device->event_thread_handle);
+	kfree(mhi_dev_ctxt->event_thread_handle);
 	return MHI_STATUS_ERROR;
 }
 
 /**
  * @brief Spawn all the MHI threads
  *
- * @param device mhi device context
+ * @param mhi_dev_ctxt mhi mhi_dev_ctxt context
  *
  * @return MHI_STATUS
  *
  */
-MHI_STATUS mhi_spawn_threads(mhi_device_ctxt *device)
+MHI_STATUS mhi_spawn_threads(mhi_device_ctxt *mhi_dev_ctxt)
 {
 	/* Spawn the XFER thread */
-	if (MHI_STATUS_SUCCESS != mhi_spawn_thread(device,
+	if (MHI_STATUS_SUCCESS != mhi_spawn_thread(mhi_dev_ctxt,
 				parse_event_thread,
-				device->event_thread_handle,
+				mhi_dev_ctxt->event_thread_handle,
 				"MHI_EV_THREAD")) {
 		mhi_log(MHI_MSG_ERROR, "Failed to start xfer thread");
 		return MHI_STATUS_ERROR;
 	}
 
 	/* Spawn the MST thread */
-	if (MHI_STATUS_SUCCESS != mhi_spawn_thread(device,
+	if (MHI_STATUS_SUCCESS != mhi_spawn_thread(mhi_dev_ctxt,
 				mhi_state_change_thread,
-				device->state_change_thread_handle,
+				mhi_dev_ctxt->state_change_thread_handle,
 				"MHI_STATE_THREAD")) {
 		mhi_log(MHI_MSG_ERROR, " Failed to start state thread");
 		return MHI_STATUS_ERROR;
@@ -297,59 +310,54 @@ MHI_STATUS mhi_spawn_threads(mhi_device_ctxt *device)
 /**
  * @brief Initialize the event signals for the mhi threads
  *
- * @param device[IN ] Current device context
+ * @param mhi_dev_ctxt[IN ] Current mhi_dev_ctxt context
  *
  * @return MHI_STATUS
  */
-MHI_STATUS mhi_init_events(mhi_device_ctxt *device)
+MHI_STATUS mhi_init_events(mhi_device_ctxt *mhi_dev_ctxt)
 {
 
-	device->event_handle = mhi_malloc(sizeof(osal_event));
-	if (NULL == device->event_handle) {
+	mhi_dev_ctxt->event_handle = kmalloc(sizeof(wait_queue_head_t),
+						GFP_KERNEL);
+	if (NULL == mhi_dev_ctxt->event_handle) {
 		mhi_log(MHI_MSG_ERROR, "Failed to init event");
 		return MHI_STATUS_ERROR;
 	}
-	device->state_change_event_handle = mhi_malloc(sizeof(osal_event));
-	if (NULL == device->state_change_event_handle) {
+	mhi_dev_ctxt->state_change_event_handle =
+				kmalloc(sizeof(wait_queue_head_t), GFP_KERNEL);
+	if (NULL == mhi_dev_ctxt->state_change_event_handle) {
 		mhi_log(MHI_MSG_ERROR, "Failed to init event");
 		goto error_event_handle_alloc;
 	}
 	/* Initialize the event which signals M0*/
-	device->M0_event = mhi_malloc(sizeof(osal_event));
-	if (NULL == device->M0_event) {
+	mhi_dev_ctxt->M0_event = kmalloc(sizeof(wait_queue_head_t), GFP_KERNEL);
+	if (NULL == mhi_dev_ctxt->M0_event) {
 		mhi_log(MHI_MSG_ERROR, "Failed to init event");
 		goto error_state_change_event_handle;
 	}
-	device->mhi_xfer_stop = mhi_malloc(sizeof(osal_event));
-	if (NULL == device->mhi_xfer_stop) {
-		mhi_log(MHI_MSG_ERROR, "Failed to init event");
-		goto error_M0_event;
-	}
 	/* Initialize the event which signals M0*/
-	device->M3_event = mhi_malloc(sizeof(osal_event));
-	if (NULL == device->M3_event) {
+	mhi_dev_ctxt->M3_event = kmalloc(sizeof(wait_queue_head_t), GFP_KERNEL);
+	if (NULL == mhi_dev_ctxt->M3_event) {
 		mhi_log(MHI_MSG_ERROR, "Failed to init event");
 		goto error_M0_event;
 	}
 	/* Initialize the event which starts the event parsing thread */
-	mhi_init_event(device->event_handle);
+	init_waitqueue_head(mhi_dev_ctxt->event_handle);
 	/* Initialize the event which starts the state change thread */
-	mhi_init_event(device->state_change_event_handle);
+	init_waitqueue_head(mhi_dev_ctxt->state_change_event_handle);
 	/* Initialize the event which triggers clients waiting to send*/
-	mhi_init_event(device->M0_event);
+	init_waitqueue_head(mhi_dev_ctxt->M0_event);
 	/* Initialize the event which triggers D3hot*/
-	mhi_init_event(device->M3_event);
-	/* Initialize the event which signals that no clients are sending */
-	mhi_init_event(device->mhi_xfer_stop);
+	init_waitqueue_head(mhi_dev_ctxt->M3_event);
 
 	return MHI_STATUS_SUCCESS;
 
 error_M0_event:
-	mhi_free(device->M0_event);
+	kfree(mhi_dev_ctxt->M0_event);
 error_state_change_event_handle:
-	mhi_free(device->state_change_event_handle);
+	kfree(mhi_dev_ctxt->state_change_event_handle);
 error_event_handle_alloc:
-	mhi_free(device->event_handle);
+	kfree(mhi_dev_ctxt->event_handle);
 	return MHI_STATUS_ERROR;
 }
 /**
@@ -371,63 +379,58 @@ MHI_STATUS mhi_init_state_change_thread_work_queue(mhi_state_work_queue *q)
 	q->q_info.el_size = sizeof(mhi_state_work_item);
 	q->q_info.overwrite_en = 0;
 	if (NULL == q->q_mutex) {
-		q->q_mutex = mhi_malloc(sizeof(osal_mutex));
+		q->q_mutex = kmalloc(sizeof(struct mutex), GFP_KERNEL);
 		if (NULL == q->q_mutex)
 			return MHI_STATUS_ALLOC_ERROR;
-		if (MHI_STATUS_SUCCESS != mhi_init_mutex(q->q_mutex))
-			return MHI_STATUS_ERROR;
+		mutex_init(q->q_mutex);
 	}
 
 	return MHI_STATUS_SUCCESS;
 }
 /* @brief Initialize the event ring and add event ring
- *	elements for the device to fill.  Write the event
- *	doorbell, to announce to the device the new available elements
+ *	elements for the mhi_dev_ctxt to fill.  Write the event
+ *	doorbell, to announce to the mhi_dev_ctxt the new available elements
  */
-MHI_STATUS mhi_init_event_ring(mhi_device_ctxt *device, u32 nr_ev_el,
+MHI_STATUS mhi_init_event_ring(mhi_device_ctxt *mhi_dev_ctxt, u32 nr_ev_el,
 				u32 event_ring_index)
 {
 	mhi_event_pkt *ev_pkt = NULL;
 	u32 i = 0;
 	u64 db_value = 0;
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
-	osal_spinlock *lock = &device->mhi_ev_spinlock_list[event_ring_index];
+	spinlock_t *lock =
+		&mhi_dev_ctxt->mhi_ev_spinlock_list[event_ring_index];
 	mhi_ring *event_ctxt = NULL;
 
-	if (NULL == device || 0 == nr_ev_el) {
+	if (NULL == mhi_dev_ctxt || 0 == nr_ev_el) {
 		mhi_log(MHI_MSG_ERROR, "Bad Input data, quitting\n");
 		return MHI_STATUS_ERROR;
 	}
 
-	if (MHI_STATUS_SUCCESS != mhi_acquire_spinlock(lock)) {
-		mhi_log(MHI_MSG_ERROR, "Could not acquire spinlock\n");
-		return MHI_STATUS_ERROR;
-	}
+	spin_lock(lock);
 
 	mhi_log(MHI_MSG_INFO, "mmio_addr = 0x%lx, mmio_len = 0x%llx\n",
-				device->mmio_addr, device->mmio_len);
+			mhi_dev_ctxt->mmio_addr, mhi_dev_ctxt->mmio_len);
 	mhi_log(MHI_MSG_INFO,
 			"Initializing event ring %d\n", event_ring_index);
 
 	for (i = 0; i < nr_ev_el - 1; ++i) {
-		event_ctxt = &device->mhi_local_event_ctxt[event_ring_index];
-		ret_val = add_element(event_ctxt, (void *)&ev_pkt);
+		event_ctxt =
+			&mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index];
+		ret_val = ctxt_add_element(event_ctxt, (void *)&ev_pkt);
 		if (MHI_STATUS_SUCCESS != ret_val) {
 			mhi_log(MHI_MSG_ERROR,
 				"Failed to insert el in ev ctxt\n");
 			ret_val = MHI_STATUS_ERROR;
 			break;
 		}
-		db_value = mhi_v2p_addr(device->mhi_ctrl_seg_info,
+		db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 				(uintptr_t)event_ctxt->wp);
-		MHI_WRITE_DB(device->event_db_addr,
+		MHI_WRITE_DB(mhi_dev_ctxt->event_db_addr,
 					event_ring_index, db_value);
 	}
 
-	if (MHI_STATUS_SUCCESS != mhi_release_spinlock(lock)) {
-		mhi_log(MHI_MSG_ERROR, "Failed to release ev ring spinlock\n");
-		return MHI_STATUS_ERROR;
-	}
+	spin_unlock(lock);
 	return ret_val;
 }
 
@@ -530,23 +533,23 @@ MHI_STATUS mhi_init_contexts(mhi_device_ctxt *mhi_device)
 	mhi_xfer_pkt *trb_list = NULL;
 	mhi_chan_ctxt *chan_ctxt = NULL;
 	mhi_ring *local_event_ctxt = NULL;
-	u32 intmodt_val = 0;
+	u32 msi_vec = 0;
 
 	for (i = 0; i < EVENT_RINGS_ALLOCATED; ++i) {
+		MHI_GET_EVENT_RING_INFO(EVENT_RING_MSI_VEC,
+					mhi_device->ev_ring_props[i],
+					msi_vec);
 		event_ring_index = mhi_device->alloced_ev_rings[i];
 		event_ctxt = &mhi_ctrl->mhi_ec_list[event_ring_index];
-		local_event_ctxt = 
+		local_event_ctxt =
 			&mhi_device->mhi_local_event_ctxt[event_ring_index];
 
-		if (i != PRIMARY_EVENT_RING)
-			intmodt_val = MHI_HW_INTMOD_VAL_MS;
-		else
-			intmodt_val = 0;
 		mhi_event_ring_init(event_ctxt,
 				mhi_v2p_addr(mhi_device->mhi_ctrl_seg_info,
 					(uintptr_t)mhi_ctrl->ev_trb_list[i]),
 				(uintptr_t)mhi_ctrl->ev_trb_list[i],
-				EV_EL_PER_RING, local_event_ctxt, intmodt_val);
+				EV_EL_PER_RING, local_event_ctxt, 0,
+				msi_vec);
 	}
 
 	/* Init Command Ring */
@@ -614,6 +617,7 @@ MHI_STATUS mhi_init_chan_ctxt(mhi_chan_ctxt *cc_list,
 	cc_list->mhi_trb_read_ptr = trb_list_phy;
 	cc_list->mhi_trb_write_ptr = trb_list_phy;
 	ring->rp = (void *)(trb_list_virt);
+	ring->ack_rp = ring->rp;
 	ring->wp = (void *)(trb_list_virt);
 	ring->base = (void *)(trb_list_virt);
 	ring->len = ((size_t)(el_per_ring)*sizeof(mhi_tx_pkt));
@@ -635,15 +639,15 @@ MHI_STATUS mhi_init_chan_ctxt(mhi_chan_ctxt *cc_list,
  */
 MHI_STATUS mhi_event_ring_init(mhi_event_ctxt *ev_list,
 		uintptr_t trb_list_phy_addr, uintptr_t trb_list_virt_addr,
-		size_t el_per_ring, mhi_ring *ring, u32 intmodt_val)
+		size_t el_per_ring, mhi_ring *ring,
+		u32 intmodt_val, u32 msi_vec)
 {
 	ev_list->mhi_event_er_type = MHI_EVENT_RING_TYPE_VALID;
-	ev_list->mhi_msi_vector = 1;
+	ev_list->mhi_msi_vector     = msi_vec;
 	ev_list->mhi_event_ring_base_addr = trb_list_phy_addr;
 	ev_list->mhi_event_ring_len = el_per_ring*sizeof(mhi_event_pkt);
 	ev_list->mhi_event_read_ptr = trb_list_phy_addr;
 	ev_list->mhi_event_write_ptr = trb_list_phy_addr;
-	MHI_SET_EV_CTXT(EVENT_CTXT_INTMODT, ev_list, intmodt_val);
 	ring->wp = (void *)(uintptr_t)trb_list_virt_addr;
 	ring->rp = (void *)(uintptr_t)trb_list_virt_addr;
 	ring->base = (void *)(uintptr_t)(trb_list_virt_addr);
@@ -682,12 +686,12 @@ MHI_STATUS mhi_cmd_ring_init(mhi_cmd_ctxt *cmd_ctxt,
 	return MHI_STATUS_SUCCESS;
 }
 
-MHI_STATUS mhi_reset_all_thread_queues(mhi_device_ctxt *device)
+MHI_STATUS mhi_reset_all_thread_queues(mhi_device_ctxt *mhi_dev_ctxt)
 {
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
 
 	mhi_init_state_change_thread_work_queue(
-				&device->state_change_work_item_list);
+				&mhi_dev_ctxt->state_change_work_item_list);
 	if (MHI_STATUS_SUCCESS != ret_val) {
 		mhi_log(MHI_MSG_ERROR, "Failed to reset STT work queue\n");
 		return ret_val;
@@ -695,13 +699,13 @@ MHI_STATUS mhi_reset_all_thread_queues(mhi_device_ctxt *device)
 	return ret_val;
 }
 
-MHI_STATUS mhi_init_timers(mhi_device_ctxt *device)
+MHI_STATUS mhi_init_timers(mhi_device_ctxt *mhi_dev_ctxt)
 {
-	hrtimer_init(&device->inactivity_tmr,
+	hrtimer_init(&mhi_dev_ctxt->inactivity_tmr,
 			CLOCK_MONOTONIC,
 			HRTIMER_MODE_REL);
-	device->inactivity_timeout =
+	mhi_dev_ctxt->inactivity_timeout =
 			ktime_set(0, MHI_M1_ENTRY_DELAY_MS * 1E6L);
-	device->inactivity_tmr.function = mhi_initiate_M1;
+	mhi_dev_ctxt->inactivity_tmr.function = mhi_initiate_M1;
 	return MHI_STATUS_SUCCESS;
 }

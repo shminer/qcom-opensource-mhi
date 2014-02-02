@@ -13,11 +13,9 @@
 #define _MHI_SHIM_PUB
 
 #include <linux/types.h>
-#include <asm/types.h>
-typedef void* mhi_shim_client_handle;
+typedef void *mhi_shim_client_handle;
 
-typedef enum MHI_SHIM_CLIENT_CHANNEL
-{
+typedef enum MHI_SHIM_CLIENT_CHANNEL {
 	MHI_SHIM_CLIENT_LOOPBACK_OUT = 0,
 	MHI_SHIM_CLIENT_LOOPBACK_IN = 1,
 	MHI_SHIM_CLIENT_SAHARA_OUT = 2,
@@ -64,42 +62,39 @@ typedef enum MHI_SHIM_CLIENT_CHANNEL
 	MHI_SHIM_CLIENT_CSVT_IN = 43,
 	MHI_SHIM_CLIENT_SMCT_OUT = 44,
 	MHI_SHIM_CLIENT_SMCT_IN = 45,
-}MHI_SHIM_CLIENT_CHANNEL;
+} MHI_SHIM_CLIENT_CHANNEL;
 
-typedef enum MHI_SHIM_STATUS
-{
+typedef enum MHI_SHIM_STATUS {
 	MHI_SHIM_STATUS_SUCCESS = 0,
 	MHI_SHIM_STATUS_ERROR = 1,
 	MHI_SHIM_STATUS_RING_FULL = 3,
 	MHI_SHIM_STATUS_RING_EMPTY = 4,
-}MHI_SHIM_STATUS;
+} MHI_SHIM_STATUS;
 
-typedef struct mhi_shim_result
-{
-	void* user_data; /*<-- Data passed back to the user's callback -->*/
-	void* payload_buf; /*<-- Payload for rx call -->*/
-	u32 bytes_xferd; /*<-- Actual number of bytes transferred -->*/
-	MHI_SHIM_STATUS transaction_status; /*<-- Returned status of the last transaction -->*/
-}mhi_shim_result;
+typedef struct mhi_shim_result {
+	void *user_data;
+	void *payload_buf;
+	u32 bytes_xferd;
+	MHI_SHIM_STATUS transaction_status;
+} mhi_shim_result;
 
-typedef struct mhi_shim_client_cbs_t
-{
-	/*CB to be invoked upon packet transmission rx/tx*/
-	void (*mhi_shim_xfer_cb)(mhi_shim_result*);
-	/*CB to be invoked upon a channel reset */ 
-	void (*mhi_shim_chan_reset_cb)(void* user_data);
-}mhi_shim_client_cbs_t;
+typedef struct mhi_shim_client_info_t {
+	void (*mhi_shim_xfer_cb)(mhi_shim_result *);
+	void (*mhi_shim_chan_reset_cb)(void *user_data);
+	u32 cb_mod;
+} mhi_shim_client_info_t;
 
 int mhi_shim_get_free_buf_count(mhi_shim_client_handle client_handle);
-void mhi_shim_poll_inbound(mhi_shim_client_handle client_handle, uintptr_t* buf ,size_t* buf_size);
+void mhi_shim_poll_inbound(mhi_shim_client_handle client_handle,
+				uintptr_t *buf, ssize_t *buf_size);
 
 void mhi_shim_close_channel(mhi_shim_client_handle client_handle);
-MHI_SHIM_STATUS mhi_shim_open_channel(mhi_shim_client_handle* client_handle,
+MHI_SHIM_STATUS mhi_shim_open_channel(mhi_shim_client_handle *client_handle,
 		MHI_SHIM_CLIENT_CHANNEL chan, s32 device_index,
-		mhi_shim_client_cbs_t* RxCb, void* user_data);
-MHI_SHIM_STATUS mhi_shim_queue_xfer(mhi_shim_client_handle client_handle, 
-		uintptr_t buf, size_t buf_len, u32 chain);
+		mhi_shim_client_info_t *rx_cb, void *user_data);
+MHI_SHIM_STATUS mhi_shim_queue_xfer(mhi_shim_client_handle client_handle,
+		uintptr_t buf, size_t buf_len, u32 chain, u32 eob);
 
 MHI_SHIM_STATUS mhi_shim_recycle_buffer(mhi_shim_client_handle client_handle);
 
-#endif 
+#endif

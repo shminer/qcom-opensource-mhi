@@ -44,21 +44,26 @@ static unsigned int mhi_shim_client_poll(struct file *file, poll_table *wait)
 	shim_handle = file->private_data;
 	if (NULL == shim_handle)
 		return -ENODEV;
+
+
 	poll_wait(file, &shim_handle->read_wait_queue, wait);
 
 	if (atomic_read(&shim_handle->avail_pkts) > 0)
 		mask |= POLLIN | POLLRDNORM;
+
 	mhi_shim_log(SHIM_DBG_VERBOSE,
-			"Returning mask 0x%x\n", mask);
+		"Client attempted to poll chan 0x%x, returning mask 0x%x\n",
+		shim_handle->in_chan, mask);
 	return mask;
 }
 static int mhi_shim_client_open(struct inode *mhi_inode,
-		struct file *file_handle)
+				struct file *file_handle)
 {
 	shim_client *shim_client_handle = NULL;
 	int ret_val = 0;
 	shim_client_handle =
 		&mhi_shim_ctxt.client_handle_list[iminor(mhi_inode)];
+
 	mhi_shim_log(SHIM_DBG_VERBOSE,
 			"Client opened device node 0x%x\n", iminor(mhi_inode));
 
@@ -70,7 +75,7 @@ static int mhi_shim_client_open(struct inode *mhi_inode,
 	ret_val = mhi_shim_open_channel(&shim_client_handle->outbound_handle,
 			(MHI_SHIM_CLIENT_CHANNEL)shim_client_handle->out_chan,
 			0,
-			(mhi_shim_client_cbs_t *)&(mhi_shim_ctxt.client_cbs),
+			(mhi_shim_client_info_t *)&(mhi_shim_ctxt.client_info),
 			(void *)shim_client_handle->out_chan);
 
 	if (MHI_SHIM_STATUS_SUCCESS != ret_val) {
@@ -100,84 +105,120 @@ static int mhi_shim_client_release(struct inode *mhi_inode,
 }
 
 static ssize_t mhi_shim_client_read(struct file *file, char __user *buf,
-		size_t uspace_buf_size, loff_t *offp)
+		size_t uspace_buf_size, loff_t *bytes_pending)
 {
 	shim_client *shim_handle = NULL;
 	uintptr_t phy_buf = 0;
 	mhi_shim_client_handle *client_handle = NULL;
-	size_t amount_to_copy = 0;
 	int ret_val = 0;
 	size_t buf_size = 0;
 	struct mutex *mutex;
 	u32 chan = 0;
-
+	ssize_t phy_buf_size = 0;
+	ssize_t bytes_copied = 0;
+	void *pkt_loc = NULL;
+	u32 addr_offset = 0;
 
 	if (NULL == file || NULL == buf ||
-			0 == uspace_buf_size || NULL == file->private_data)
+	    0 == uspace_buf_size || NULL == file->private_data)
 		return -EINVAL;
 
+	mhi_shim_log(SHIM_DBG_VERBOSE,
+		"Client attempted read on chan 0x%x\n", chan);
 	shim_handle = file->private_data;
 	client_handle = shim_handle->inbound_handle;
 	mutex = &mhi_shim_ctxt.client_chan_lock[shim_handle->in_chan];
 	chan = shim_handle->in_chan;
 	mutex_lock(mutex);
 	buf_size = mhi_shim_ctxt.channel_attributes[chan].max_packet_size;
-	*offp = 0;
-	mhi_shim_poll_inbound(client_handle,
-			&phy_buf,
-			&shim_handle->pending_data);
-	mhi_shim_log(SHIM_DBG_VERBOSE,
-			"Obtained buffer of size 0x%x at addr 0x%x, on chan 0x%x\n",
-			shim_handle->pending_data, (size_t)phy_buf, chan);
 
-	if (0 == phy_buf || 0 == shim_handle->pending_data ||
-			atomic_read(&shim_handle->avail_pkts) <= 0) {
-		/* If nothing was copied yet, wait for data */
+	do {
+		mhi_shim_poll_inbound(client_handle,
+				&phy_buf,
+				&phy_buf_size);
 		mhi_shim_log(SHIM_DBG_VERBOSE,
-				"No data to read, waiting avail_pkts %d, chan %d\n",
-				atomic_read(&shim_handle->avail_pkts), chan);
-		wait_event_interruptible(
+			"Obtained pkt of size 0x%x at addr 0x%lx, chan 0x%x\n",
+			phy_buf_size, (uintptr_t)phy_buf, chan);
+		if (0 == phy_buf || 0 == phy_buf_size ||
+				atomic_read(&shim_handle->avail_pkts) <= 0) {
+			/* If nothing was copied yet, wait for data */
+			mhi_shim_log(SHIM_DBG_VERBOSE,
+					"No data avail_pkts %d, chan %d\n",
+					atomic_read(&shim_handle->avail_pkts),
+					chan);
+			wait_event_interruptible(
 				shim_handle->read_wait_queue,
 				(atomic_read(&shim_handle->avail_pkts) > 0));
-		mhi_shim_log(SHIM_DBG_VERBOSE,
-				"Data has arrived continuing avail_pkts %d chan %d\n",
-				atomic_read(&shim_handle->avail_pkts), chan);
-	}
-	dma_unmap_single(NULL,
+		}
+	} while (!phy_buf);
+
+	pkt_loc = dma_to_virt(NULL, (dma_addr_t)(uintptr_t)phy_buf);
+	if (*bytes_pending == 0) {
+		*bytes_pending = phy_buf_size;
+		dma_unmap_single(NULL,
 			(dma_addr_t)phy_buf,
 			buf_size,
 			DMA_BIDIRECTIONAL);
-	*offp = (uintptr_t)dma_to_virt(NULL,
-			(dma_addr_t)(uintptr_t)phy_buf);
-	amount_to_copy = shim_handle->pending_data;
-
-
-	if (0 != copy_to_user(buf, (void *)(uintptr_t)(*offp),
-				amount_to_copy)) {
-		ret_val = -EIO;
-		goto error;
 	}
-	memset((void *)(uintptr_t)(*offp), 0, buf_size);
-	/* No need to free this buffer, re-submit it to mhi */
-	dma_map_single(NULL, (void *)(uintptr_t)(*offp),
-			buf_size,
-			DMA_BIDIRECTIONAL);
-	mhi_shim_log(SHIM_DBG_VERBOSE,
-			"Decrementing avail pkts\n");
-	atomic_dec(&shim_handle->avail_pkts);
-	ret_val = mhi_shim_recycle_buffer(client_handle);
-	if (MHI_SHIM_STATUS_SUCCESS != ret_val) {
-		mhi_shim_log(SHIM_DBG_ERROR,
-				"Failed to recycle element\n");
-		ret_val = -EIO;
-		goto error;
-	}
+	if (uspace_buf_size >= *bytes_pending) {
+		addr_offset = phy_buf_size - *bytes_pending;
+		if (0 != copy_to_user(buf,
+				     (void *)(uintptr_t)pkt_loc + addr_offset,
+				     *bytes_pending)) {
+			ret_val = -EIO;
+			goto error;
+		}
 
-	ret_val = amount_to_copy;
+		bytes_copied = *bytes_pending;
+		*bytes_pending = 0;
+		mhi_shim_log(SHIM_DBG_VERBOSE,
+				"Copied 0x%x of 0x%x, chan 0x%x\n",
+				bytes_copied,
+				(u32)*bytes_pending,
+				chan);
+	} else {
+		addr_offset = phy_buf_size - *bytes_pending;
+		if (0 != copy_to_user(buf,
+				     (void *)(uintptr_t)pkt_loc + addr_offset,
+				     uspace_buf_size)) {
+			ret_val = -EIO;
+			goto error;
+		}
+		bytes_copied = uspace_buf_size;
+		*bytes_pending -= uspace_buf_size;
+		mhi_shim_log(SHIM_DBG_VERBOSE,
+				"Copied 0x%x of 0x%x,chan 0x%x\n",
+				bytes_copied,
+				(u32)*bytes_pending,
+				chan);
+	}
+	/* We finished with this buffer, map it back */
+	if (*bytes_pending == 0) {
+		memset(pkt_loc, 0, buf_size);
+		dma_map_single(NULL, pkt_loc,
+				buf_size,
+				DMA_BIDIRECTIONAL);
+		mhi_shim_log(SHIM_DBG_VERBOSE,
+				"Decrementing avail pkts avail 0x%x\n",
+				atomic_read(&shim_handle->avail_pkts));
+		atomic_dec(&shim_handle->avail_pkts);
+		ret_val = mhi_shim_recycle_buffer(client_handle);
+		if (MHI_SHIM_STATUS_SUCCESS != ret_val) {
+			mhi_shim_log(SHIM_DBG_ERROR,
+					"Failed to recycle element\n");
+			ret_val = -EIO;
+			goto error;
+		}
+	}
+	mhi_shim_log(SHIM_DBG_ERROR,
+			"Returning 0x%x bytes, 0x%x bytes left\n",
+			bytes_copied, (u32)*bytes_pending);
+	mutex_unlock(mutex);
+	return bytes_copied;
 error:
 	mutex_unlock(mutex);
 	mhi_shim_log(SHIM_DBG_VERBOSE,
-			"Returning 0x%x bytes\n", ret_val);
+			"Returning %d bytes\n", ret_val);
 	return ret_val;
 }
 
@@ -189,8 +230,6 @@ static ssize_t mhi_shim_client_write(struct file *file,
 	int ret_val = 0;
 	u32 chan = 0xFFFFFFFF;
 
-	mhi_shim_log(SHIM_DBG_VERBOSE,
-			"Attempting to write 0x%x bytes\n", count);
 	if (NULL == file || NULL == buf ||
 			0 == count || NULL == file->private_data)
 		return -EINVAL;
@@ -212,7 +251,8 @@ int mhi_shim_probe(struct pci_dev *dev)
 	shim_client *curr_client = NULL;
 	s32 r = 0;
 
-	mhi_shim_ctxt.client_cbs.mhi_shim_xfer_cb = shim_xfer_cb;
+	mhi_shim_ctxt.client_info.mhi_shim_xfer_cb = shim_xfer_cb;
+	mhi_shim_ctxt.client_info.cb_mod = 1;
 
 	for (i = 0; i < MHI_MAX_SOFTWARE_CHANNELS; ++i)
 		mutex_init(&mhi_shim_ctxt.client_chan_lock[i]);
@@ -224,7 +264,7 @@ int mhi_shim_probe(struct pci_dev *dev)
 		return -EIO;
 	}
 	mhi_shim_log(SHIM_DBG_VERBOSE, "Initializing clients\n");
-	/* Initiate the inbound path for all client handles */
+
 	for (i = 0; i < MHI_SOFTWARE_CLIENT_LIMIT; ++i) {
 		curr_client = &mhi_shim_ctxt.client_handle_list[i];
 		init_handle = &curr_client->inbound_handle;
@@ -233,11 +273,10 @@ int mhi_shim_probe(struct pci_dev *dev)
 		curr_client->in_chan = i * 2 + 1;
 		curr_client->client_index = i;
 
-		mhi_shim_log(SHIM_DBG_VERBOSE, "Attempting to open channel: \n");
 		ret_val = mhi_shim_open_channel(init_handle,
 				curr_client->in_chan,
 				0,
-				&mhi_shim_ctxt.client_cbs,
+				&mhi_shim_ctxt.client_info,
 				(void *)(curr_client->in_chan));
 
 		if (MHI_SHIM_STATUS_SUCCESS != ret_val)
@@ -249,7 +288,6 @@ int mhi_shim_probe(struct pci_dev *dev)
 			"Failed to init inbound 0x%x, ret 0x%x\n", i, ret_val);
 	}
 	mhi_shim_log(SHIM_DBG_VERBOSE, "Allocating char devices\n");
-	/* Bring up the char devices */
 	r = alloc_chrdev_region(&mhi_shim_ctxt.start_ctrl_nr,
 			0, MHI_MAX_SOFTWARE_CHANNELS,
 			DEVICE_NAME);
@@ -317,8 +355,6 @@ int mhi_shim_remove(struct pci_dev *dev)
 int mhi_shim_send_packet(mhi_shim_client_handle *client_handle,
 		void *buf, u32 size, u32 chan)
 {
-	MHI_SHIM_STATUS ret_val = MHI_SHIM_STATUS_SUCCESS;
-	u32 avail_buf_space = 0;
 	u32 nr_avail_trbs = 0;
 	u32 chain = 0;
 	u32 i = 0;
@@ -328,6 +364,8 @@ int mhi_shim_send_packet(mhi_shim_client_handle *client_handle,
 	size_t data_to_insert_now = 0;
 	u32 data_inserted_so_far = 0;
 	dma_addr_t dma_addr = 0;
+	u32 eob = 0;
+	int ret_val = 0;
 
 	if (NULL == client_handle || NULL == buf || 0 == size)
 		return MHI_SHIM_STATUS_ERROR;
@@ -336,10 +374,8 @@ int mhi_shim_send_packet(mhi_shim_client_handle *client_handle,
 
 	data_left_to_insert = size;
 
-	if (0 == nr_avail_trbs) {
-		mhi_shim_log(SHIM_DBG_ERROR, "Channel Full 0x%x\n", size);
-		return -ENOMEM;
-	}
+	if (0 == nr_avail_trbs)
+		return 0;
 
 	for (i = 0; i < nr_avail_trbs; ++i) {
 		data_to_insert_now = MIN(data_left_to_insert,
@@ -348,43 +384,52 @@ int mhi_shim_send_packet(mhi_shim_client_handle *client_handle,
 		data_loc = kmalloc(data_to_insert_now, GFP_KERNEL);
 		if (NULL == data_loc) {
 			mhi_shim_log(SHIM_DBG_ERROR,
-				"Failed to allocate memory 0x%x\n", size);
+				"Failed to allocate memory 0x%x\n",
+				data_to_insert_now);
 			return -ENOMEM;
 		}
 		memcpy_result = copy_from_user(data_loc,
 				buf + data_inserted_so_far,
 				data_to_insert_now);
-		if (0 != memcpy_result)
-			return data_inserted_so_far;
 
-		dma_addr = dma_map_single(NULL, data_loc, size, DMA_TO_DEVICE);
+		if (0 != memcpy_result)
+			goto error_memcpy;
+
+		dma_addr = dma_map_single(NULL, data_loc,
+					data_to_insert_now, DMA_TO_DEVICE);
 		if (dma_mapping_error(NULL, dma_addr)) {
 			mhi_shim_log(SHIM_DBG_ERROR,
 					"Failed to Map DMA 0x%x\n", size);
+			goto error_memcpy;
 			return -ENOMEM;
 		}
 
-		data_left_to_insert -= data_to_insert_now;
-
-		chain = (data_left_to_insert > 0) ? 1 : 0;
+		chain = (data_left_to_insert - data_to_insert_now > 0) ? 1 : 0;
+		eob = chain;
+		mhi_shim_log(SHIM_DBG_VERBOSE,
+				"At trb i = %d/%d, chain = %d, eob = %d\n", i,
+				nr_avail_trbs, chain, eob);
 		ret_val = mhi_shim_queue_xfer(client_handle, dma_addr,
-				data_to_insert_now, chain);
-		if (0 != ret_val)
-		{
-			data_inserted_so_far = 0;
-			dma_unmap_single(NULL,
-				(dma_addr_t)dma_addr,
-				data_to_insert_now,
-				DMA_TO_DEVICE);
-			kfree(data_loc);
-			break;
-		}
-		if (0 == data_left_to_insert || 0 == avail_buf_space)
-		{
+				data_to_insert_now, chain, eob);
+		if (0 != ret_val) {
+			goto error_queue;
+		} else {
+			data_left_to_insert -= data_to_insert_now;
 			data_inserted_so_far += data_to_insert_now;
-			break;
 		}
+
+		if (0 == data_left_to_insert)
+			break;
 	}
+	return data_inserted_so_far;
+
+error_queue:
+	dma_unmap_single(NULL,
+		(dma_addr_t)dma_addr,
+		data_to_insert_now,
+		DMA_TO_DEVICE);
+error_memcpy:
+	kfree(data_loc);
 	return data_inserted_so_far;
 }
 
@@ -434,7 +479,6 @@ MHI_SHIM_STATUS mhi_init_inbound(mhi_shim_client_handle *client_handle,
 		mhi_shim_log(SHIM_DBG_ERROR, "Bad Input data, quitting\n");
 		return MHI_SHIM_STATUS_ERROR;
 	}
-
 	for (i = 0; i < (chan_attributes->nr_trbs - 1); ++i) {
 		data_loc = kmalloc(buf_size, GFP_KERNEL);
 		dma_addr = dma_map_single(NULL, data_loc,
@@ -444,7 +488,7 @@ MHI_SHIM_STATUS mhi_init_inbound(mhi_shim_client_handle *client_handle,
 			return -ENOMEM;
 		}
 		(ret_val = mhi_shim_queue_xfer(*client_handle,
-					       dma_addr, buf_size, 0));
+					       dma_addr, buf_size, 0, 0));
 		if (MHI_SHIM_STATUS_SUCCESS != ret_val)
 			goto error_insert;
 	}
@@ -462,12 +506,14 @@ void shim_xfer_cb(mhi_shim_result *result)
 	shim_client *shim_handle = NULL;
 	u32 client_index = chan_nr / 2;
 
-	mhi_shim_log(SHIM_DBG_VERBOSE,
-			"Received cb on chan 0x%x\n", chan_nr);
 	if (chan_nr % 2) {
 		shim_handle =
 			&mhi_shim_ctxt.client_handle_list[client_index];
 		atomic_inc(&shim_handle->avail_pkts);
+		mhi_shim_log(SHIM_DBG_VERBOSE,
+			"Received cb on chan 0x%x, avail pkts: 0x%x\n",
+			chan_nr,
+			atomic_read(&shim_handle->avail_pkts));
 		wake_up(&shim_handle->read_wait_queue);
 	} else {
 		dma_unmap_single(NULL,
