@@ -80,6 +80,7 @@
 #define VALID_BUF(_BUF_ADDR,_BUF_LEN) (((uintptr_t)(_BUF_ADDR)>= MHI_DATA_SEG_WINDOW_START_ADDR) && \
 		(((uintptr_t)(_BUF_ADDR) + (uintptr_t)(_BUF_LEN) <	 \
 		 MHI_DATA_SEG_WINDOW_END_ADDR)))
+#define MHI_HW_INTMOD_VAL_MS  2
 /* Timeout Values */
 #define MHI_READY_STATUS_TIMEOUT_MS 10000
 #define MHI_THREAD_SLEEP_TIMEOUT_MS 20
@@ -262,5 +263,17 @@ do {									 \
 	_DEST &= (((MHI_##_FIELD ## __MASK) << MHI_##_FIELD ## __SHIFT));\
 	_DEST >>= MHI_##_FIELD ## __SHIFT;				\
 };
+
+#define EVENT_CTXT_INTMODT
+#define MHI_EVENT_CTXT_INTMODT__MASK (0xFFFF)
+#define MHI_EVENT_CTXT_INTMODT__SHIFT (16)
+#define MHI_SET_EV_CTXT(_FIELD, _CTXT, _VAL)				\
+{									\
+	u32 new_val = (_VAL << MHI_##_FIELD ## __SHIFT);		\
+	new_val &= (MHI_##_FIELD ## __MASK << MHI_##_FIELD ## __SHIFT); \
+	(_CTXT)->mhi_intmodt &=(~((MHI_##_FIELD ## __MASK) << MHI_##_FIELD ## __SHIFT)); \
+	(_CTXT)->mhi_intmodt |= new_val;				\
+};
+
 
 #endif
