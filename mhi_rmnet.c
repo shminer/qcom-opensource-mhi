@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -39,7 +39,54 @@
 #define DMA_RANGE_CHECK(dma_addr, size, mask) \
 			(((dma_addr) | ((dma_addr) + (size) - 1)) & ~(mask))
 
+unsigned long tx_interrupts_count[MHI_RMNET_DEVICE_COUNT];
+module_param_array(tx_interrupts_count, ulong, 0, S_IRUGO);
+MODULE_PARM_DESC(tx_interrupts_count, "Tx interrupts");
+
+unsigned long rx_interrupts_count[MHI_RMNET_DEVICE_COUNT];
+module_param_array(rx_interrupts_count, ulong, 0, S_IRUGO);
+MODULE_PARM_DESC(rx_interrupts_count, "RX interrupts");
+
+unsigned long tx_ring_full_count[MHI_RMNET_DEVICE_COUNT];
+module_param_array(tx_ring_full_count, ulong, 0, S_IRUGO);
+MODULE_PARM_DESC(tx_ring_full_count, "RING FULL errors from MHI Core");
+
+unsigned long tx_bounce_buffers_count[MHI_RMNET_DEVICE_COUNT];
+module_param_array(tx_bounce_buffers_count, ulong, 0, S_IRUGO);
+MODULE_PARM_DESC(tx_bounce_buffers_count, "TX bounce buffers used");
+
+unsigned long tx_queued_packets_count[MHI_RMNET_DEVICE_COUNT];
+module_param_array(tx_queued_packets_count, ulong, 0, S_IRUGO);
+MODULE_PARM_DESC(tx_queued_packets_count, "TX packets queued in MHI core");
+
+unsigned long rx_interrupts_in_masked_irq[MHI_RMNET_DEVICE_COUNT];
+module_param_array(rx_interrupts_in_masked_irq, ulong, 0, S_IRUGO);
+MODULE_PARM_DESC(rx_interrupts_in_masked_irq,
+		 "RX interrupts while IRQs are masked");
+
+unsigned long rx_napi_skb_burst_min[MHI_RMNET_DEVICE_COUNT];
+module_param_array(rx_napi_skb_burst_min, ulong, 0, S_IRUGO);
+MODULE_PARM_DESC(rx_napi_skb_burst_min, "MIN SKBs sent to NS during NAPI");
+
+unsigned long rx_napi_skb_burst_max[MHI_RMNET_DEVICE_COUNT];
+module_param_array(rx_napi_skb_burst_max, ulong, 0, S_IRUGO);
+MODULE_PARM_DESC(rx_napi_skb_burst_max, "MAX SKBs sent to NS during NAPI");
+
+unsigned long tx_cb_skb_free_burst_min[MHI_RMNET_DEVICE_COUNT];
+module_param_array(tx_cb_skb_free_burst_min, ulong, 0, S_IRUGO);
+MODULE_PARM_DESC(tx_cb_skb_free_burst_min, "MIN SKBs freed during TX CB");
+
+unsigned long tx_cb_skb_free_burst_max[MHI_RMNET_DEVICE_COUNT];
+module_param_array(tx_cb_skb_free_burst_max, ulong, 0, S_IRUGO);
+MODULE_PARM_DESC(tx_cb_skb_free_burst_max, "MAX SKBs freed during TX CB");
+
+unsigned long rx_napi_budget_overflow[MHI_RMNET_DEVICE_COUNT];
+module_param_array(rx_napi_budget_overflow, ulong, 0, S_IRUGO);
+MODULE_PARM_DESC(rx_napi_budget_overflow,
+		 "Budget hit with more items to read counter");
+
 struct rmnet_mhi_private {
+	int                           dev_index;
 	void                         *tx_client_handle;
 	void                         *rx_client_handle;
 	MHI_RMNET_HW_CLIENT_CHANNEL   tx_channel;
@@ -49,7 +96,6 @@ struct rmnet_mhi_private {
 	uint32_t                      mru;
 	struct napi_struct            napi;
 	struct sk_buff_head           tx_bounce_buffers;
-	int                           irq_while_disabled_count;
 	gfp_t                         allocation_flags;
 	uint32_t                      tx_buffers_max;
 	uint32_t                      rx_buffers_max;
@@ -120,7 +166,6 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 	MHI_RMNET_STATUS res = MHI_RMNET_STATUS_reserved;
 	bool should_reschedule = true;
 
-
 	/* Reset the watchdog? */
 
 	while (received_packets < budget) {
@@ -182,11 +227,10 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 		dev->stats.rx_packets++;
 		dev->stats.rx_bytes += result->bytes_xferd;
 
-	/* Need to allocate a new buffer instead of this one
-	   (TODO: Maybe we can do it @ the end?)
-	 */
-	skb = alloc_skb(rmnet_mhi_ptr->mru,
-					GFP_ATOMIC);
+		/* Need to allocate a new buffer instead of this one
+		   (TODO: Maybe we can do it @ the end?)
+		 */
+		skb = alloc_skb(rmnet_mhi_ptr->mru, GFP_ATOMIC);
 
 		if (0 == skb) {
 			/* TODO: Handle error */
@@ -235,7 +279,7 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 			dma_unmap_single(&(dev->dev), dma_addr, skb->len,
 							 DMA_FROM_DEVICE);
 
- 		    kfree_skb(skb);
+			kfree_skb(skb);
 			break;
 		}
 
@@ -246,12 +290,23 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 	napi_complete(napi);
 
 	/* We got a NULL descriptor back */
-	if (false == should_reschedule)
+	if (false == should_reschedule) {
 		mhi_rmnet_unmask_irq(rmnet_mhi_ptr->rx_client_handle);
-	else
+	} else {
+		if (received_packets == budget)
+			rx_napi_budget_overflow[rmnet_mhi_ptr->dev_index]++;
 		napi_reschedule(napi);
+	}
 
 	/* Start a watchdog? */
+
+	rx_napi_skb_burst_min[rmnet_mhi_ptr->dev_index] =
+	min((unsigned long)received_packets,
+	    rx_napi_skb_burst_min[rmnet_mhi_ptr->dev_index]);
+
+	rx_napi_skb_burst_max[rmnet_mhi_ptr->dev_index] =
+	max((unsigned long)received_packets,
+	    rx_napi_skb_burst_max[rmnet_mhi_ptr->dev_index]);
 
 	return received_packets;
 }
@@ -260,6 +315,9 @@ void rmnet_mhi_tx_cb(mhi_rmnet_result *cb_info)
 {
 	struct net_device *dev = (struct net_device *)cb_info->user_data;
 	struct rmnet_mhi_private *rmnet_mhi_ptr = netdev_priv(dev);
+	unsigned long burst_counter = 0;
+
+	tx_interrupts_count[rmnet_mhi_ptr->dev_index]++;
 
 	if (0 == cb_info->payload || 0 == cb_info->bytes_xferd) {
 		return;
@@ -295,10 +353,11 @@ void rmnet_mhi_tx_cb(mhi_rmnet_result *cb_info)
 					&(rmnet_mhi_ptr->tx_bounce_buffers),
 					skb);
 			else {
-				dma_unmap_single(&(dev->dev), dma_addr, skb->len,
-								 DMA_TO_DEVICE);
+				dma_unmap_single(&(dev->dev), dma_addr,
+						 skb->len, DMA_TO_DEVICE);
 				kfree_skb(skb);
 			}
+			burst_counter++;
 
 			/* Update statistics */
 			dev->stats.tx_packets++;
@@ -311,6 +370,14 @@ void rmnet_mhi_tx_cb(mhi_rmnet_result *cb_info)
 		}
 	} /* While TX queue is not empty */
 
+	tx_cb_skb_free_burst_min[rmnet_mhi_ptr->dev_index] =
+		min(burst_counter,
+		    tx_cb_skb_free_burst_min[rmnet_mhi_ptr->dev_index]);
+
+	tx_cb_skb_free_burst_max[rmnet_mhi_ptr->dev_index] =
+		max(burst_counter,
+		    tx_cb_skb_free_burst_max[rmnet_mhi_ptr->dev_index]);
+
 	/* In case we couldn't write again, now we can! */
 	netif_start_queue(dev);
 
@@ -321,16 +388,17 @@ void rmnet_mhi_rx_cb(mhi_rmnet_result *cb_info)
 	struct net_device *dev = (struct net_device *)cb_info->user_data;
 	struct rmnet_mhi_private *rmnet_mhi_ptr = netdev_priv(dev);
 
+	rx_interrupts_count[rmnet_mhi_ptr->dev_index]++;
+
 	/* Disable interrupts */
 	mhi_rmnet_mask_irq(rmnet_mhi_ptr->rx_client_handle);
 
 	/* We need to start a watchdog here, not sure how to do that yet */
 
-	if (napi_schedule_prep(&(rmnet_mhi_ptr->napi))) {
+	if (napi_schedule_prep(&(rmnet_mhi_ptr->napi)))
 		__napi_schedule(&(rmnet_mhi_ptr->napi));
-	} else {
-			++(rmnet_mhi_ptr->irq_while_disabled_count);
-	}
+	else
+		rx_interrupts_in_masked_irq[rmnet_mhi_ptr->dev_index]++;
 }
 
 /* TODO: BIG TODO here, not sure yet what needs to be cleaned and when,
@@ -609,13 +677,12 @@ static int rmnet_mhi_xmit(struct sk_buff *skb, struct net_device *dev)
 		tx_priv->is_bounce_buffer = false;
 	}
 
-
-
 	res = mhi_rmnet_queue_buffer(rmnet_mhi_ptr->tx_client_handle,
 				     (uintptr_t)(dma_addr), skb->len);
 
 	if (MHI_RMNET_STATUS_RING_FULL == res) {
 		/* Need to stop writing until we can write again */
+		tx_ring_full_count[rmnet_mhi_ptr->dev_index]++;
 		netif_stop_queue(dev);
 			goto rmnet_mhi_xmit_error_cleanup;
 	}
@@ -631,7 +698,11 @@ static int rmnet_mhi_xmit(struct sk_buff *skb, struct net_device *dev)
 	skb_queue_tail(&(rmnet_mhi_ptr->tx_buffers), skb);
 
 	dev->trans_start = jiffies;
-	
+
+	if (bounce_buffer_used)
+		tx_bounce_buffers_count[rmnet_mhi_ptr->dev_index]++;
+
+	tx_queued_packets_count[rmnet_mhi_ptr->dev_index]++;
 	return 0;
 
 rmnet_mhi_xmit_error_cleanup:
@@ -763,6 +834,18 @@ int rmnet_mhi_probe(struct pci_dev *dev)
 	int ret = 0, index = 0, cleanup_index = 0;
 	struct rmnet_mhi_private *rmnet_mhi_ptr = 0;
 
+	memset(tx_interrupts_count, 0, sizeof(tx_interrupts_count));
+	memset(rx_interrupts_count, 0, sizeof(rx_interrupts_count));
+	memset(rx_interrupts_in_masked_irq, 0,
+	       sizeof(rx_interrupts_in_masked_irq));
+	memset(rx_napi_skb_burst_min, 0, sizeof(rx_napi_skb_burst_min));
+	memset(rx_napi_skb_burst_max, 0, sizeof(rx_napi_skb_burst_max));
+	memset(tx_cb_skb_free_burst_min, 0, sizeof(tx_cb_skb_free_burst_min));
+	memset(tx_cb_skb_free_burst_max, 0, sizeof(tx_cb_skb_free_burst_max));
+	memset(tx_ring_full_count, 0, sizeof(tx_ring_full_count));
+	memset(tx_bounce_buffers_count, 0, sizeof(tx_bounce_buffers_count));
+	memset(tx_queued_packets_count, 0, sizeof(tx_queued_packets_count));
+	memset(rx_napi_budget_overflow, 0, sizeof(rx_napi_budget_overflow));
 
 	for (index = 0; index < MHI_RMNET_DEVICE_COUNT; index++) {
 		mhi_rmnet_devices[index] =
@@ -795,7 +878,7 @@ int rmnet_mhi_probe(struct pci_dev *dev)
 		rmnet_mhi_ptr->tx_client_handle = 0;
 		rmnet_mhi_ptr->rx_client_handle = 0;
 		rmnet_mhi_ptr->mru = MHI_DEFAULT_MRU;
-		rmnet_mhi_ptr->irq_while_disabled_count = 0;
+		rmnet_mhi_ptr->dev_index = index;
 
 		netif_napi_add(mhi_rmnet_devices[index], &(rmnet_mhi_ptr->napi),
 			       rmnet_mhi_poll, MHI_NAPI_WEIGHT_VALUE);
@@ -806,6 +889,9 @@ int rmnet_mhi_probe(struct pci_dev *dev)
 			       __func__);
 			goto fail;
 		}
+
+		rx_napi_skb_burst_min[index] = UINT_MAX;
+		tx_cb_skb_free_burst_min[index] = UINT_MAX;
 	}
 	return 0;
 
