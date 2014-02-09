@@ -776,11 +776,6 @@ static int rmnet_mhi_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 	case RMNET_IOCTL_SET_LLP_IP:        /* Set RAWIP protocol */
 		break;
 	case RMNET_IOCTL_GET_LLP:           /* Get link protocol state */
-		ioctl_data.u.operation_mode = RMNET_MODE_LLP_IP;
-		if (copy_to_user(ifr->ifr_ifru.ifru_data, &ioctl_data,
-		    sizeof(struct rmnet_ioctl_data_s)))
-			rc = -EFAULT;
-		break;
 	case RMNET_IOCTL_GET_OPMODE:        /* Get operation mode      */
 		ioctl_data.u.operation_mode = RMNET_MODE_LLP_IP;
 		if (copy_to_user(ifr->ifr_ifru.ifru_data, &ioctl_data,
