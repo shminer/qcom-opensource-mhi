@@ -207,7 +207,7 @@ MHI_STATUS mhi_add_elements_to_event_rings(mhi_device_ctxt *mhi_dev_ctxt,
 			return MHI_STATUS_ERROR;
 		}
 		break;
-	case STATE_TRANSITION_M0:
+	case STATE_TRANSITION_AMSS:
 		ret_val = mhi_init_event_ring(mhi_dev_ctxt,
 			 EV_EL_PER_RING,
 			 mhi_dev_ctxt->alloced_ev_rings[SECONDARY_EVENT_RING]);
@@ -710,6 +710,8 @@ MHI_STATUS parse_cmd_event(mhi_device_ctxt *mhi_dev_ctxt, mhi_event_pkt *ev_pkt)
 								cmd_pkt))
 				mhi_log(MHI_MSG_INFO,
 					"Failed to process reset cmd\n");
+			atomic_dec(&mhi_dev_ctxt->start_cmd_pending_ack);
+			wake_up(mhi_dev_ctxt->chan_start_complete);
 			break;
 		}
 		default:

@@ -145,6 +145,23 @@ MHI_STATUS mhi_process_event_ring(mhi_device_ctxt *mhi_dev_ctxt,
 			mhi_init_state_transition(mhi_dev_ctxt, new_state);
 			break;
 		}
+		case MHI_PKT_TYPE_EE_EVENT:
+		{
+			MHI_STATE_TRANSITION new_state;
+			switch(MHI_READ_EXEC_ENV(&event_to_process)) {
+			case MHI_EXEC_ENV_SBL:
+				new_state = STATE_TRANSITION_SBL;
+				mhi_init_state_transition(mhi_dev_ctxt,
+								new_state);
+				break;
+			case MHI_EXEC_ENV_AMSS:
+				new_state = STATE_TRANSITION_AMSS;
+				mhi_init_state_transition(mhi_dev_ctxt,
+								new_state);
+				break;
+			}
+				break;
+		}
 		default:
 			mhi_log(MHI_MSG_ERROR,
 				"Unsupported packet type code 0x%x\n",
