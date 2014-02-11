@@ -52,6 +52,7 @@
 #define MHI_MAX_TIMEOUT_MS 20000UL
 #define MHI_M1_ENTRY_DELAY_MS 30
 
+
 /* MHI GPIOs */
 #define MHI_DEVICE_WAKE_GPIO 108
 /* PCIe Device Info */
@@ -142,6 +143,12 @@
 			MHI_EV_STATE__SHIFT) & \
 		MHI_EV_STATE__MASK)
 
+#define EXEC_ENV
+#define MHI_EXEC_ENV__MASK (0xFF)
+#define MHI_EXEC_ENV__SHIFT (24)
+#define MHI_READ_EXEC_ENV(_PKT) ((((_PKT)->ee_event_pkt).exec_env>> \
+			MHI_EXEC_ENV__SHIFT) & \
+		MHI_EXEC_ENV__MASK)
 
 /* MacroS for reading common "info" field for TRBs*/
 #define TX_TRB_CHAIN

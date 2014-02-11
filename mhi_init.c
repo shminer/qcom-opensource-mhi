@@ -341,6 +341,11 @@ MHI_STATUS mhi_init_events(mhi_device_ctxt *mhi_dev_ctxt)
 		mhi_log(MHI_MSG_ERROR, "Failed to init event");
 		goto error_M0_event;
 	}
+	mhi_dev_ctxt->chan_start_complete= kmalloc(sizeof(wait_queue_head_t), GFP_KERNEL);
+	if (NULL == mhi_dev_ctxt->chan_start_complete) {
+		mhi_log(MHI_MSG_ERROR, "Failed to init event");
+		goto error_M3_event;
+	}
 	/* Initialize the event which starts the event parsing thread */
 	init_waitqueue_head(mhi_dev_ctxt->event_handle);
 	/* Initialize the event which starts the state change thread */
@@ -349,9 +354,11 @@ MHI_STATUS mhi_init_events(mhi_device_ctxt *mhi_dev_ctxt)
 	init_waitqueue_head(mhi_dev_ctxt->M0_event);
 	/* Initialize the event which triggers D3hot*/
 	init_waitqueue_head(mhi_dev_ctxt->M3_event);
+	init_waitqueue_head(mhi_dev_ctxt->chan_start_complete);
 
 	return MHI_STATUS_SUCCESS;
-
+error_M3_event:
+	kfree(mhi_dev_ctxt->M3_event);
 error_M0_event:
 	kfree(mhi_dev_ctxt->M0_event);
 error_state_change_event_handle:
