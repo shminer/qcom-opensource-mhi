@@ -20,12 +20,12 @@ inline MHI_RMNET_STATUS mhi_rmnet_open_channel(
 			mhi_rmnet_client_handle * mhi_rmnet_handle,
 			MHI_RMNET_HW_CLIENT_CHANNEL chan_id,
 			void *user_data,
-			mhi_rmnet_client_cbs *cbs)
+			mhi_rmnet_client_info *cbs)
 {
 	return (MHI_RMNET_STATUS)mhi_open_channel(
 			(mhi_client_handle **)mhi_rmnet_handle,
 			chan_id,
-			0, (mhi_client_cbs_t *)cbs, user_data);
+			0, (mhi_client_info_t *)cbs, user_data);
 }
 
 /* MHI RMnet API Implementation */
@@ -35,7 +35,7 @@ inline MHI_RMNET_STATUS mhi_rmnet_queue_buffer(
 {
 	return (MHI_RMNET_STATUS)mhi_queue_xfer(
 					(mhi_client_handle *)mhi_rmnet_handle,
-					buf, len, 0);
+					buf, len, 0, 0);
 }
 inline void mhi_rmnet_close_channel(mhi_rmnet_client_handle mhi_rmnet_handle)
 {
@@ -52,7 +52,8 @@ inline void mhi_rmnet_unmask_irq(mhi_rmnet_client_handle mhi_rmnet_handle)
 inline mhi_rmnet_result *mhi_rmnet_poll(
 				mhi_rmnet_client_handle mhi_rmnet_handle)
 {
-	return (mhi_rmnet_result *)mhi_poll((mhi_client_handle *)mhi_rmnet_handle);
+	return (mhi_rmnet_result *)mhi_poll(
+				(mhi_client_handle *)mhi_rmnet_handle);
 }
 inline MHI_RMNET_STATUS mhi_rmnet_reset_channel(mhi_rmnet_client_handle
 							mhi_rmnet_handle)
@@ -77,7 +78,7 @@ inline int mhi_shim_get_free_buf_count(mhi_shim_client_handle client_handle)
 }
 
 inline void mhi_shim_poll_inbound(mhi_shim_client_handle client_handle,
-					uintptr_t *buf, size_t *buf_size)
+					uintptr_t *buf, ssize_t *buf_size)
 {
 	mhi_poll_inbound((mhi_client_handle *)client_handle, buf, buf_size);
 }
@@ -87,11 +88,11 @@ inline void mhi_shim_close_channel(mhi_shim_client_handle client_handle)
 	mhi_close_channel((mhi_client_handle *)client_handle);
 }
 MHI_SHIM_STATUS mhi_shim_queue_xfer(mhi_shim_client_handle client_handle,
-				uintptr_t buf, size_t buf_len, u32 chain)
+			uintptr_t buf, size_t buf_len, u32 chain, u32 eob)
 {
 	return (MHI_SHIM_STATUS)mhi_queue_xfer(
 			(mhi_client_handle *)client_handle,
-			buf, buf_len, chain);
+			buf, buf_len, chain, eob);
 }
 MHI_SHIM_STATUS mhi_shim_recycle_buffer(mhi_shim_client_handle client_handle)
 {
@@ -100,11 +101,11 @@ MHI_SHIM_STATUS mhi_shim_recycle_buffer(mhi_shim_client_handle client_handle)
 }
 MHI_SHIM_STATUS mhi_shim_open_channel(mhi_shim_client_handle *client_handle,
 		MHI_SHIM_CLIENT_CHANNEL chan, s32 device_index,
-		mhi_shim_client_cbs_t *cbs, void *user_data)
+		mhi_shim_client_info_t *cbs, void *user_data)
 {
 	return (MHI_SHIM_STATUS)mhi_open_channel(
 			(mhi_client_handle **)client_handle,
 			(MHI_CLIENT_CHANNEL)chan, device_index,
-			(mhi_client_cbs_t *)cbs, user_data);
+			(mhi_client_info_t *)cbs, user_data);
 }
 

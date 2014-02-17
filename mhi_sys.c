@@ -36,16 +36,15 @@ static const struct file_operations mhi_dbgfs_state_fops = {
 };
 
 static char chan_info[0x1000];
-int mhi_init_debugfs(mhi_device_ctxt* mhi_dev_ctxt)
+int mhi_init_debugfs(mhi_device_ctxt *mhi_dev_ctxt)
 {
 	struct dentry *mhi_parent_folder;
 	struct dentry *mhi_chan_stats;
 	struct dentry *mhi_state_stats;
 	mhi_parent_folder = debugfs_create_dir("mhi", NULL);
-	if (NULL == mhi_parent_folder)
-	{
+	if (NULL == mhi_parent_folder) {
 		mhi_log(MHI_MSG_INFO, "Failed to create debugfs parent dir.\n");
-		return -1;
+		return -EIO;
 	}
 	mhi_chan_stats = debugfs_create_file("mhi_chan_stats",
 					0444,
@@ -66,6 +65,7 @@ static ssize_t mhi_dbgfs_state_read(struct file *fp, char __user *buf,
 	mhi_device_ctxt *mhi_dev_ctxt = mhi_devices.device_list[0].mhi_ctxt;
 	if (NULL == mhi_dev_ctxt)
 		return -EIO;
+	usleep(100000);
 	amnt_copied =
 	scnprintf(chan_info,
 			sizeof(chan_info),
@@ -92,14 +92,16 @@ static ssize_t mhi_dbgfs_chan_read(struct file *fp, char __user *buf,
 				size_t count, loff_t *offp)
 {
 	int amnt_copied = 0;
+	mhi_chan_ctxt *chan_ctxt;
 	mhi_device_ctxt *mhi_dev_ctxt = mhi_devices.device_list[0].mhi_ctxt;
 	if (NULL == mhi_dev_ctxt)
 		return -EIO;
 	*offp = (u32)(*offp) % MHI_MAX_CHANNELS;
+	chan_ctxt = &mhi_dev_ctxt->mhi_ctrl_seg->mhi_cc_list[*offp];
 	amnt_copied =
 	scnprintf(chan_info,
 		sizeof(chan_info),
-		"%s0x%x %s %d %s %d %s 0x%x %s 0x%llx %s %p %s %p %s %p",
+		"%s0x%x %s %d %s %d %s 0x%x %s 0x%llx %s %p %s %p %s %p\n",
 		"chan:",
 		(unsigned int)*offp,
 		"pkts to dev:",
@@ -107,9 +109,9 @@ static ssize_t mhi_dbgfs_chan_read(struct file *fp, char __user *buf,
 		"pkts from dev:",
 		mhi_dev_ctxt->mhi_chan_cntr[*offp].pkts_from_dev,
 		"chan_state:",
-		mhi_dev_ctxt->mhi_ctrl_seg->mhi_cc_list[*offp].mhi_chan_state,
+		chan_ctxt->mhi_chan_state,
 		"chan_base phy:",
-		mhi_dev_ctxt->mhi_ctrl_seg->mhi_cc_list[*offp].mhi_trb_ring_base_addr,
+		chan_ctxt->mhi_trb_ring_base_addr,
 		"chan_base virt:",
 		mhi_dev_ctxt->mhi_local_chan_ctxt[*offp].base,
 		"chan_wp virt:",
@@ -119,7 +121,8 @@ static ssize_t mhi_dbgfs_chan_read(struct file *fp, char __user *buf,
 	*offp += 1;
 
 	if (amnt_copied < count)
-		return amnt_copied - copy_to_user(buf, chan_info, amnt_copied);
+		return amnt_copied -
+			copy_to_user(buf, chan_info, amnt_copied);
 	else
 		return -ENOMEM;
 }
@@ -137,13 +140,6 @@ inline void *mhi_get_virt_addr(mhi_meminfo *meminfo)
 	return (void *)meminfo->va_aligned;
 }
 
-MHI_STATUS mhi_trigger_event(osal_event *handle)
-{
-	if (NULL == handle)
-		return MHI_STATUS_ERROR;
-	wake_up(&handle->event);
-	return MHI_STATUS_SUCCESS;
-}
 inline void mhi_memcpy(void *to, void *from, size_t size)
 {
 	memcpy(to, from, size);
@@ -152,74 +148,6 @@ inline void mhi_memcpy(void *to, void *from, size_t size)
 inline u64 mhi_get_memregion_len(mhi_meminfo *meminfo)
 {
 	return meminfo->size;
-}
-
-MHI_STATUS mhi_init_event(osal_event *handle)
-{
-	if (NULL == handle)
-		return MHI_STATUS_ERROR;
-	init_waitqueue_head(&handle->event);
-
-	return MHI_STATUS_SUCCESS;
-}
-void *mhi_malloc(size_t buf_size)
-{
-	/* This is a virtual malloc, we don't need physical contiguity */
-	return kmalloc(buf_size, GFP_KERNEL);
-}
-void mhi_free(void *data)
-{
-	kfree(data);
-}
-void mhi_memset(void *ptr, int value, size_t num)
-{
-	memset(ptr, value, num);
-}
-MHI_STATUS mhi_init_mutex(osal_mutex *mutex)
-{
-	if (NULL == mutex)
-		return MHI_STATUS_ERROR;
-	mutex_init(&mutex->lock);
-	return MHI_STATUS_SUCCESS;
-}
-
-MHI_STATUS mhi_release_mutex(osal_mutex *mutex)
-{
-	if (NULL == mutex)
-		return MHI_STATUS_ERROR;
-	mutex_unlock(&mutex->lock);
-	return MHI_STATUS_SUCCESS;
-}
-
-MHI_STATUS mhi_acquire_mutex(osal_mutex *mutex)
-{
-	if (NULL == mutex)
-		return MHI_STATUS_ERROR;
-	mutex_lock(&mutex->lock);
-	return MHI_STATUS_SUCCESS;
-}
-
-MHI_STATUS mhi_init_spinlock(osal_spinlock *spinlock)
-{
-	if (NULL == spinlock)
-		return MHI_STATUS_ERROR;
-	spin_lock_init(&spinlock->lock);
-	return MHI_STATUS_SUCCESS;
-}
-
-MHI_STATUS mhi_acquire_spinlock(osal_spinlock *spinlock)
-{
-	if (NULL == spinlock)
-		return MHI_STATUS_ERROR;
-	spin_lock(&spinlock->lock);
-	return MHI_STATUS_SUCCESS;
-}
-MHI_STATUS mhi_release_spinlock(osal_spinlock *spinlock)
-{
-	if (NULL == spinlock)
-		return MHI_STATUS_ERROR;
-	spin_unlock(&spinlock->lock);
-	return MHI_STATUS_SUCCESS;
 }
 
 MHI_STATUS mhi_mallocmemregion(mhi_meminfo *meminfo, size_t size)
@@ -263,7 +191,25 @@ MHI_STATUS mhi_spawn_thread(void *ctxt, int(fn)(void *),
 	else
 		return MHI_STATUS_SUCCESS;
 }
-inline void mhi_sleep(u32 time_ms)
+
+void print_ring(mhi_ring *local_chan_ctxt, u32 ring_id)
 {
-	msleep(time_ms);
+	u32 i = 0;
+	mhi_log(MHI_MSG_VERBOSE,
+		"Chan %d, ACK_RP 0x%p RP 0x%p WP 0x%p BASE 0x%p:\n",
+		ring_id,
+		local_chan_ctxt->ack_rp,
+		local_chan_ctxt->rp,
+		local_chan_ctxt->wp,
+		local_chan_ctxt->base);
+	for (i = 0; i < MAX_NR_TRBS_PER_SOFT_CHAN; ++i) {
+		mhi_log(MHI_MSG_VERBOSE, "0x%x: TRB: 0x%p ",
+			i, &((mhi_tx_pkt *)local_chan_ctxt->base)[i]);
+		mhi_log(MHI_MSG_VERBOSE,
+			"Buff Ptr = 0x%llx, Buf Len: 0x%x, Buf Flags: 0x%x\n",
+			((mhi_tx_pkt *)(local_chan_ctxt->base))[i].buffer_ptr,
+			((mhi_tx_pkt *)(local_chan_ctxt->base))[i].buf_len,
+			((mhi_tx_pkt *)(local_chan_ctxt->base))[i].info);
+	}
+
 }

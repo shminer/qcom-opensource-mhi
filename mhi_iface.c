@@ -18,32 +18,17 @@
 #include "mhi_hwio.h"
 #include "mhi_bhi.h"
 
-#define BHI_DISABLED 1
-int mhi_probe(struct pci_dev* mhi_device,
-		const struct pci_device_id* mhi_device_id);
-static void mhi_remove(struct pci_dev* mhi_device);
-static int mhi_startup_thread(void* ctxt);
-int rmnet_mhi_remove(struct pci_dev *dev);
-
-/* MHI's list of all available pcie devices which support the MHI protocol */
 mhi_pcie_devices mhi_devices;
 
-static const struct pci_device_id mhi_pcie_device_id[] =
-{
-	{ MHI_PCIE_VENDOR_ID, MHI_PCIE_DEVICE_ID,PCI_ANY_ID,PCI_ANY_ID,0,0,0},
+static const struct pci_device_id mhi_pcie_device_id[] = {
+	{ MHI_PCIE_VENDOR_ID, MHI_PCIE_DEVICE_ID,
+	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
 	{ 0, },
 };
-/*
-   static struct attribute_group mhi_stats_attr[] =
-   {
-   __ATTR(probe, S_IWUSR | S_IRUSR, show_mhi_state, NULL),
-   __ATTR_NULL,
-   }; */
 
-/* Publicize the existance of this device to userspace */
-MODULE_DEVICE_TABLE(pci,mhi_pcie_device_id);
-struct pci_driver mhi_pcie_driver =
-{
+MODULE_DEVICE_TABLE(pci, mhi_pcie_device_id);
+
+struct pci_driver mhi_pcie_driver = {
 	.name = "mhi_driver",
 	.id_table = mhi_pcie_device_id,
 	.probe = mhi_probe,
@@ -52,41 +37,38 @@ struct pci_driver mhi_pcie_driver =
 	.resume = mhi_resume,
 };
 
-int mhi_probe(struct pci_dev* pcie_device,
-		const struct pci_device_id* mhi_device_id)
+int mhi_probe(struct pci_dev *pcie_device,
+		const struct pci_device_id *mhi_device_id)
 {
-	int ret_val			 = 0;
+	int ret_val = 0;
 	mhi_pcie_dev_info *mhi_pcie_dev = NULL;
 	osal_thread mhi_startup_thread_handle = {0};
 
 	mhi_log(MHI_MSG_INFO, "Entering.\n");
 
-
 	mhi_pcie_dev = &mhi_devices.device_list[mhi_devices.nr_of_devices];
-	if (mhi_devices.nr_of_devices + 1 > MHI_MAX_SUPPORTED_DEVICES)
-	{
-		mhi_log(MHI_MSG_ERROR,"Error: Too many devices\n");
-		return -1;
+	if (mhi_devices.nr_of_devices + 1 > MHI_MAX_SUPPORTED_DEVICES) {
+		mhi_log(MHI_MSG_ERROR, "Error: Too many devices\n");
+		return -ENOMEM;
 	}
 
 	mhi_devices.nr_of_devices++;
 	mhi_pcie_dev->pcie_device = pcie_device;
-
-	if (MHI_STATUS_SUCCESS != (ret_val = mhi_spawn_thread(mhi_pcie_dev,
-					mhi_startup_thread,
-					&mhi_startup_thread_handle,
-					"MHI_DPROBE_THREAD")))
-	{
-		mhi_log(MHI_MSG_ERROR,"Failed to spawn deferred probe thread\n");
-	}
-
+	ret_val = mhi_spawn_thread(mhi_pcie_dev,
+				mhi_startup_thread,
+				&mhi_startup_thread_handle,
+				"MHI_DPROBE_THREAD");
+	if (ret_val)
+		mhi_log(MHI_MSG_ERROR,
+			"Failed to spawn deferred probe thread\n");
 	return ret_val;
 }
-static void mhi_remove(struct pci_dev* mhi_device)
+void mhi_remove(struct pci_dev *mhi_device)
 {
 	rmnet_mhi_remove(NULL);
 	return;
 }
+
 static void __exit mhi_exit(void)
 {
 	pci_unregister_driver(&mhi_pcie_driver);
@@ -94,35 +76,32 @@ static void __exit mhi_exit(void)
 
 static int __init mhi_init(void)
 {
-	if (0!= pci_register_driver(&mhi_pcie_driver))
+	if (pci_register_driver(&mhi_pcie_driver))
 		return -EIO;
 	return 0;
 }
 
 static void mhi_msm_fixup(struct pci_dev *pcie_device)
 {
-	if (pcie_device->class == PCI_CLASS_NOT_DEFINED)
-	{
-		mhi_log(MHI_MSG_INFO,"Setting msm pcie class\n");
+	if (pcie_device->class == PCI_CLASS_NOT_DEFINED) {
+		mhi_log(MHI_MSG_INFO, "Setting msm pcie class\n");
 		pcie_device->class = PCI_CLASS_STORAGE_SCSI;
 	}
-
-	/* @brief Client requests, a device by the pcie device id */
 }
 
-static int mhi_startup_thread(void* ctxt)
+int mhi_startup_thread(void *ctxt)
 {
-	int ret_val			 = 0;
-	mhi_pcie_dev_info* mhi_pcie_dev = (mhi_pcie_dev_info*)ctxt;
-	struct pci_dev* pcie_device = (struct pci_dev*)mhi_pcie_dev->pcie_device;
+	int ret_val = 0;
+	mhi_pcie_dev_info *mhi_pcie_dev = (mhi_pcie_dev_info *)ctxt;
+	struct pci_dev *pcie_device =
+		(struct pci_dev *)mhi_pcie_dev->pcie_device;
 
 	if (NULL == ctxt)
-		return -1;
+		return -EINVAL;
 
 	ret_val = mhi_init_pcie_device(mhi_pcie_dev);
 
-	if (0 != ret_val)
-	{
+	if (0 != ret_val) {
 		mhi_log(MHI_MSG_CRITICAL,
 			"Failed to initialize pcie device, ret %d\n",
 			ret_val);
@@ -132,64 +111,63 @@ static int mhi_startup_thread(void* ctxt)
 	if (MHI_STATUS_SUCCESS != ret_val)
 		goto msi_config_err;
 
-	/* Register for MSI */
-	if (0 != (ret_val = pci_enable_msi(pcie_device)))
-	{
-		mhi_log(MHI_MSG_ERROR, "Failed to enable MSIs for pcie dev.\n");
+	ret_val = pci_enable_msi_block(pcie_device, MAX_NR_MSI);
+	if (0 != ret_val) {
+		mhi_log(MHI_MSG_ERROR,
+			"Failed to enable MSIs for pcie dev ret_val = %d.\n",
+			ret_val);
 		goto msi_config_err;
 	}
 	ret_val = request_irq(pcie_device->irq, (irq_handler_t)irq_cb,
-					IRQF_NO_SUSPEND,
-					"mhi_drv",
-					(void*)&pcie_device->dev);
-	if (0 != ret_val)
-	{
-		mhi_log(MHI_MSG_ERROR, "Failed to register handler for MSI.\n");
+						 IRQF_NO_SUSPEND,
+						 "mhi_drv",
+						 (void *)&pcie_device->dev);
+	if (ret_val) {
+		mhi_log(MHI_MSG_ERROR,
+			"Failed to register handler for MSI.\n");
 		goto msi_config_err;
 	}
+	mhi_pcie_dev->core.irq_base = pcie_device->irq;
+	ret_val = request_irq(pcie_device->irq + 1,
+					(irq_handler_t)irq_cb,
+					IRQF_NO_SUSPEND,
+					"mhi_drv",
+					(void *)&pcie_device->dev);
+	if (ret_val) {
+		mhi_log(MHI_MSG_ERROR,
+			"Failed to register handler for MSI.\n");
+		goto msi_config_err;
+	}
+	mhi_pcie_dev->core.max_nr_msis = MAX_NR_MSI;
 	ret_val = mhi_init_gpios(mhi_pcie_dev);
-	if (0 != ret_val)
-	{
+	if (0 != ret_val) {
 		mhi_log(MHI_MSG_ERROR | MHI_DBG_POWER,
 			"Failed to register for GPIO.\n");
 		goto msi_config_err;
 	}
 	ret_val = mhi_init_pm_sysfs(&pcie_device->dev);
-	if (0 != ret_val)
-	{
+	if (0 != ret_val) {
 		mhi_log(MHI_MSG_ERROR, "Failed to setup sysfs.\n");
 		goto sysfs_config_err;
 	}
 	if (0 != mhi_init_debugfs(mhi_pcie_dev->mhi_ctxt))
-	{
 		mhi_log(MHI_MSG_ERROR, "Failed to init debugfs.\n");
-	}
 
 	pci_set_master(pcie_device);
 	mhi_pcie_dev->mhi_ctxt->mmio_addr = (mhi_pcie_dev->core.bar0_base);
-	pcie_device->dev.platform_data = (void*)&mhi_pcie_dev->mhi_ctxt;
+	pcie_device->dev.platform_data = (void *)&mhi_pcie_dev->mhi_ctxt;
 
-
-#ifdef BHI_DISABLED
 	/* Fire off the state transition  thread */
 	ret_val = mhi_init_state_transition(mhi_pcie_dev->mhi_ctxt,
 					STATE_TRANSITION_RESET);
 	if (MHI_STATUS_SUCCESS != ret_val) {
-		mhi_log(MHI_MSG_CRITICAL, "Failed to start state change event\n");
+		mhi_log(MHI_MSG_CRITICAL,
+			"Failed to start state change event\n");
 		goto mhi_state_transition_error;
 	}
-#else
-	/* Register BHI, at this point the device can have firmware loaded */
-	if (MHI_STATUS_SUCCESS != bhi_probe(mhi_pcie_dev)) {
-		mhi_log(MHI_MSG_CRITICAL, "Failed to start BHI\n");
-		goto mhi_state_transition_error;
-	}
-	ret_val = mhi_init_state_transition(mhi_pcie_dev->mhi_ctxt,
-					STATE_TRANSITION_BHI);
-#endif
-
 	mhi_log(MHI_MSG_INFO,
-			"Finished all driver probing returning ret_val %d.\n", ret_val);
+			"Finished all driver probing returning ret_val %d.\n",
+			ret_val);
 	return ret_val;
 
 mhi_state_transition_error:

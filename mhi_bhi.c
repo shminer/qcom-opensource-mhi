@@ -9,21 +9,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License for more details.
  */
-#include <linux/module.h>
-#include <linux/miscdevice.h>
-#include <linux/kernel.h>
-#include <linux/pci.h>
-#include <linux/completion.h>
-#include <linux/fs.h>
-#include <linux/platform_device.h>
-#include <linux/jiffies.h>
-#include <linux/sysfs.h>
-#include <linux/uaccess.h>
-#include <linux/slab.h>
-#include <linux/types.h>
-/* MHI Includes */
 #include "mhi_sys.h"
-
 #include "mhi.h"
 #include "mhi_macros.h"
 #include "mhi_hwio.h"
@@ -44,7 +30,6 @@ static struct miscdevice bhi_misc_dev = {
 
 int bhi_open(struct inode *mhi_inode, struct file *file_handle)
 {
-	/* Replace with iminor(file_handle) */
 	file_handle->private_data = &mhi_devices.device_list[0];
 	return 0;
 }
@@ -64,7 +49,8 @@ ssize_t bhi_write(struct file *file,
 	mhi_device_ctxt *mhi_dev_ctxt =
 		((mhi_pcie_dev_info *)file->private_data)->mhi_ctxt;
 	size_t amount_copied = 0;
-	size_t align_len = 0x1000;
+	uintptr_t align_len = 0x1000;
+	u32 tx_db_val = 0;
 
 	if (NULL == buf || 0 == count)
 		return -EIO;
@@ -74,15 +60,16 @@ ssize_t bhi_write(struct file *file,
 
 	mhi_log(MHI_MSG_INFO, "Entered. User Image size 0x%x\n", count);
 
-	/* Fire off the state transition  thread */
+	bhi_ctxt->unaligned_image_loc = kmalloc(count + (align_len - 1),
+						GFP_KERNEL);
+	mhi_log(MHI_MSG_INFO, "Unaligned Img Loc: %p\n",
+			bhi_ctxt->unaligned_image_loc);
+	bhi_ctxt->image_loc =
+			(void *)((uintptr_t)bhi_ctxt->unaligned_image_loc +
+		 (align_len - (((uintptr_t)bhi_ctxt->unaligned_image_loc) %
+			       align_len)));
 
-	bhi_ctxt->unaligned_image_loc = kmalloc(sizeof(count) + (align_len - 1),
-							GFP_KERNEL);
-	bhi_ctxt->image_loc = (void*)((uintptr_t)bhi_ctxt->unaligned_image_loc +
-				(uintptr_t)(align_len -
-				(((uintptr_t)bhi_ctxt->unaligned_image_loc) %
-				(uintptr_t)align_len)));
-
+	mhi_log(MHI_MSG_INFO, "Aligned Img Loc: %p\n", bhi_ctxt->image_loc);
 	if (NULL == bhi_ctxt->image_loc)
 		ret_val = MHI_STATUS_ERROR;
 	bhi_ctxt->image_size = count;
@@ -134,8 +121,8 @@ ssize_t bhi_write(struct file *file,
 			BHI_IMGTXDB, 0xFFFFffff, 0, ++pcie_word_val);
 
 	for (i = 0; i < BHI_POLL_NR_RETRIES; ++i) {
-		MHI_REG_READ(bhi_ctxt->bhi_base, BHI_STATUS, pcie_word_val);
-		if ((0x80000000 | pcie_word_val)  == pcie_word_val)
+		MHI_REG_READ(bhi_ctxt->bhi_base, BHI_STATUS, tx_db_val);
+		if ((0x80000000 | tx_db_val) == pcie_word_val)
 			break;
 		else
 			mhi_log(MHI_MSG_CRITICAL,
@@ -144,6 +131,7 @@ ssize_t bhi_write(struct file *file,
 	}
 	dma_unmap_single(NULL, bhi_ctxt->phy_image_loc,
 			bhi_ctxt->image_size, DMA_TO_DEVICE);
+	kfree(bhi_ctxt->unaligned_image_loc);
 
 	/* Fire off the state transition  thread */
 	ret_val = mhi_init_state_transition(mhi_dev_ctxt,
@@ -152,9 +140,7 @@ ssize_t bhi_write(struct file *file,
 		mhi_log(MHI_MSG_CRITICAL,
 				"Failed to start state change event\n");
 	}
-
 bhi_copy_error:
-	kfree(bhi_ctxt->unaligned_image_loc);
 	return amount_copied;
 }
 

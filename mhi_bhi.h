@@ -14,28 +14,28 @@
 #include "mhi.h"
 
 /** BHI Offsets */
-#define BHI_BHIVERSION_MINOR                                ( 0x00 )
-#define BHI_BHIVERSION_MAJOR                                ( 0x04 )
-#define BHI_IMGADDR_LOW                                     ( 0x08 )
-#define BHI_IMGADDR_HIGH                                    ( 0x0C )
-#define BHI_IMGSIZE                                         ( 0x10 )
-#define BHI_RSVD1                                           ( 0x14 )
-#define BHI_IMGTXDB                                         ( 0x18 )
-#define BHI_RSVD2                                           ( 0x1C )
-#define BHI_INTVEC                                          ( 0x20 )
-#define BHI_RSVD3                                           ( 0x24 )
-#define BHI_EXECENV                                         ( 0x28 )
-#define BHI_STATUS                                          ( 0x2C )
-#define BHI_ERRCODE                                         ( 0x30 )
-#define BHI_ERRDBG1                                         ( 0x34 )
-#define BHI_ERRDBG2                                         ( 0x38 )
-#define BHI_ERRDBG3                                         ( 0x3C )
-#define BHI_SERIALNUM                                       ( 0x40 )
-#define BHI_SBLANTIROLLVER                                  ( 0x44 )
-#define BHI_NUMSEG                                          ( 0x48 )
-#define BHI_MSMHWID(n)                                      ( 0x4C + 0x4 * (n) )
-#define BHI_OEMPKHASH(n)                                    ( 0x64 + 0x4 * (n) )
-#define BHI_RSVD5                                           ( 0xC4 )
+#define BHI_BHIVERSION_MINOR                               (0x00)
+#define BHI_BHIVERSION_MAJOR                               (0x04)
+#define BHI_IMGADDR_LOW                                    (0x08)
+#define BHI_IMGADDR_HIGH                                   (0x0C)
+#define BHI_IMGSIZE                                        (0x10)
+#define BHI_RSVD1                                          (0x14)
+#define BHI_IMGTXDB                                        (0x18)
+#define BHI_RSVD2                                          (0x1C)
+#define BHI_INTVEC                                         (0x20)
+#define BHI_RSVD3                                          (0x24)
+#define BHI_EXECENV                                        (0x28)
+#define BHI_STATUS                                         (0x2C)
+#define BHI_ERRCODE                                        (0x30)
+#define BHI_ERRDBG1                                        (0x34)
+#define BHI_ERRDBG2                                        (0x38)
+#define BHI_ERRDBG3                                        (0x3C)
+#define BHI_SERIALNUM                                      (0x40)
+#define BHI_SBLANTIROLLVER                                 (0x44)
+#define BHI_NUMSEG                                         (0x48)
+#define BHI_MSMHWID(n)                                     (0x4C + 0x4 * (n))
+#define BHI_OEMPKHASH(n)                                   (0x64 + 0x4 * (n))
+#define BHI_RSVD5                                          (0xC4)
 
 #define BHI_MAJOR_VERSION 0x0
 #define BHI_MINOR_VERSION 0x1
@@ -45,16 +45,16 @@
 
 #define BHI_READBUF_SIZE sizeof(bhi_info_type)
 
-#define BHI_MAX_IMAGE_SIZE 256*1024
+#define BHI_MAX_IMAGE_SIZE (256 * 1024)
 
 #define BHI_POLL_SLEEP_TIME 1000
-#define BHI_POLL_NR_RETRIES 20
+#define BHI_POLL_NR_RETRIES 1
 
 
-int bhi_probe(mhi_pcie_dev_info* mhi_pcie_device);
+int bhi_probe(mhi_pcie_dev_info *mhi_pcie_device);
 int bhi_open(struct inode *mhi_inode, struct file *file_handle);
 int bhi_release(struct inode *mhi_inode, struct file *file_handle);
 ssize_t bhi_write(struct file *file, const char __user *buf,
 		size_t count, loff_t *offp);
 
-#endif 
+#endif

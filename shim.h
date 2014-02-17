@@ -32,7 +32,7 @@
 #define MHI_MAX_NR_OF_CLIENTS 23
 #define MHI_SOFTWARE_CLIENT_START 0
 #define MHI_SOFTWARE_CLIENT_LIMIT 23
-#define MHI_MAX_SOFTWARE_CHANNELS 46
+#define MHI_MAX_SOFTWARE_CHANNELS (MHI_SOFTWARE_CLIENT_LIMIT * 2)
 
 #define MAX_NR_TRBS_PER_CHAN 10
 #define MHI_PCIE_VENDOR_ID 0x17CB
@@ -94,18 +94,18 @@ typedef struct shim_client {
 	u32 in_chan;
 	mhi_shim_client_handle outbound_handle;
 	mhi_shim_client_handle inbound_handle;
-	size_t pending_data;
 	mhi_shim_ctxt_t *shim_ctxt;
 	wait_queue_head_t read_wait_queue;
 	atomic_t avail_pkts;
 	struct device *dev;
+	u32 bytes_copied;
 } shim_client;
 
 typedef struct mhi_shim_ctxt_t {
 	chan_attr channel_attributes[MHI_MAX_SOFTWARE_CHANNELS];
 	shim_client client_handle_list[MHI_SOFTWARE_CLIENT_LIMIT];
 	struct mutex client_chan_lock[MHI_MAX_SOFTWARE_CHANNELS];
-	mhi_shim_client_cbs_t client_cbs;
+	mhi_shim_client_info_t client_info;
 	dev_t start_ctrl_nr;
 	struct cdev cdev[MHI_MAX_SOFTWARE_CHANNELS];
 	struct class *mhi_shim_class;
