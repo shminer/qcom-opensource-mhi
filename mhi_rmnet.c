@@ -428,13 +428,20 @@ void rmnet_mhi_reset_cb(void *user_data)
 
 static mhi_rmnet_client_info tx_cbs = { rmnet_mhi_tx_cb, rmnet_mhi_reset_cb, 1};
 static mhi_rmnet_client_info rx_cbs = { rmnet_mhi_rx_cb, rmnet_mhi_reset_cb, 1};
-
+static int mhi_rmnet_initialized = 0;
 static int rmnet_mhi_open(struct net_device *dev)
 {
 	MHI_RMNET_STATUS res = MHI_RMNET_STATUS_reserved;
 	struct rmnet_mhi_private *rmnet_mhi_ptr = netdev_priv(dev);
 	int index = 0;
 
+	if (mhi_rmnet_initialized) {
+		napi_enable(&(rmnet_mhi_ptr->napi));
+		netif_start_queue(dev);
+		return 0;
+	}
+	pr_info("%s(): First time channel open", __func__);
+	mhi_rmnet_initialized = 1;
 
 	res = mhi_rmnet_open_channel(
 		&(rmnet_mhi_ptr->tx_client_handle),
@@ -596,15 +603,8 @@ static int rmnet_mhi_close(struct net_device *dev)
 {
 	struct rmnet_mhi_private *rmnet_mhi_ptr = netdev_priv(dev);
 
-	if (0 != rmnet_mhi_ptr->tx_client_handle)
-		mhi_rmnet_close_channel(rmnet_mhi_ptr->tx_client_handle);
-
-	if (0 != rmnet_mhi_ptr->rx_client_handle)
-		mhi_rmnet_close_channel(rmnet_mhi_ptr->rx_client_handle);
-
 	napi_disable(&(rmnet_mhi_ptr->napi));
 
-	/* After the device is closed, reset CB will be triggered */
 	return 0;
 }
 
