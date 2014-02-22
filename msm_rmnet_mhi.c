@@ -23,8 +23,7 @@
 #include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
 #include <linux/pci.h>
-#include "mhi_rmnet.h"
-#include "mhi.h"
+#include "msm_mhi.h"
 
 #define RMNET_MHI_DRIVER_NAME "rmnet_mhi"
 #define RMNET_MHI_DEV_NAME    "rmnet_mhi%d"
@@ -38,6 +37,17 @@
 #define MHI_RMNET_DEVICE_COUNT 1 /* TODO: Will be a compile-time definition */
 #define DMA_RANGE_CHECK(dma_addr, size, mask) \
 			(((dma_addr) | ((dma_addr) + (size) - 1)) & ~(mask))
+static int rmnet_mhi_remove(struct platform_device *dev);
+static int rmnet_mhi_probe(struct platform_device *dev);
+
+static struct platform_driver mhi_rmnet_driver = {
+	.driver = {
+		.name = "mhi_rmnet",
+		.owner = THIS_MODULE,
+	},
+	.probe = rmnet_mhi_probe,
+	.remove = rmnet_mhi_remove,
+};
 
 unsigned long tx_interrupts_count[MHI_RMNET_DEVICE_COUNT];
 module_param_array(tx_interrupts_count, ulong, 0, S_IRUGO);
@@ -87,10 +97,10 @@ MODULE_PARM_DESC(rx_napi_budget_overflow,
 
 struct rmnet_mhi_private {
 	int                           dev_index;
-	void                         *tx_client_handle;
-	void                         *rx_client_handle;
-	MHI_RMNET_HW_CLIENT_CHANNEL   tx_channel;
-	MHI_RMNET_HW_CLIENT_CHANNEL   rx_channel;
+	mhi_client_handle            *tx_client_handle;
+	mhi_client_handle            *rx_client_handle;
+	MHI_CLIENT_CHANNEL            tx_channel;
+	MHI_CLIENT_CHANNEL            rx_channel;
 	struct sk_buff_head           tx_buffers;
 	struct sk_buff_head           rx_buffers;
 	uint32_t                      mru;
@@ -163,19 +173,19 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 	int received_packets = 0;
 	struct net_device *dev = napi->dev;
 	struct rmnet_mhi_private *rmnet_mhi_ptr = netdev_priv(dev);
-	MHI_RMNET_STATUS res = MHI_RMNET_STATUS_reserved;
+	MHI_STATUS res = MHI_STATUS_reserved;
 	bool should_reschedule = true;
 
 	/* Reset the watchdog? */
 
 	while (received_packets < budget) {
-		mhi_rmnet_result *result =
-		      mhi_rmnet_poll(rmnet_mhi_ptr->rx_client_handle);
+		mhi_result *result =
+		      mhi_poll(rmnet_mhi_ptr->rx_client_handle);
 		struct sk_buff *skb = 0;
 		dma_addr_t dma_addr;
 		uintptr_t *cb_ptr = 0;
 		/* Failure from MHI core */
-		if (MHI_RMNET_STATUS_SUCCESS != result->transaction_status) {
+		if (MHI_STATUS_SUCCESS != result->transaction_status) {
 			/* TODO: Handle error */
 			pr_err("%s: mhi_poll failed, error is %d",
 			       __func__, result->transaction_status);
@@ -183,7 +193,7 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 		}
 
 		/* Nothing more to read, or out of buffers in MHI layer */
-		if (0 == result->payload || 0 == result->bytes_xferd) {
+		if (0 == result->payload_buf || 0 == result->bytes_xferd) {
 			should_reschedule = false;
 			break;
 		}
@@ -206,7 +216,7 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 		dma_addr = (dma_addr_t)(uintptr_t)(*cb_ptr);
 
 		/* Sanity check, ensuring that this is actually the buffer */
-		if ((uintptr_t)dma_addr != (uintptr_t)result->payload) {
+		if ((uintptr_t)dma_addr != (uintptr_t)result->payload_buf) {
 			/* TODO: Handle error */
 			pr_err("%s: Unexpected physical address mismatch",
 			       __func__);
@@ -268,13 +278,13 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 			break;
 		}
 
-		res = mhi_rmnet_queue_buffer(
+		res = mhi_queue_xfer(
 			rmnet_mhi_ptr->rx_client_handle,
-			(uintptr_t)dma_addr, rmnet_mhi_ptr->mru);
+			(uintptr_t)dma_addr, rmnet_mhi_ptr->mru, 0, 0);
 
-		if (MHI_RMNET_STATUS_SUCCESS != res) {
+		if (MHI_STATUS_SUCCESS != res) {
 			/* TODO: Handle error */
-			pr_err("%s: mhi_queue_buffer failed, error %d",
+			pr_err("%s: mhi_queue_xfer failed, error %d",
 			       __func__, res);
 			dma_unmap_single(&(dev->dev), dma_addr, skb->len,
 							 DMA_FROM_DEVICE);
@@ -291,7 +301,7 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 
 	/* We got a NULL descriptor back */
 	if (false == should_reschedule) {
-		mhi_rmnet_unmask_irq(rmnet_mhi_ptr->rx_client_handle);
+		mhi_unmask_irq(rmnet_mhi_ptr->rx_client_handle);
 	} else {
 		if (received_packets == budget)
 			rx_napi_budget_overflow[rmnet_mhi_ptr->dev_index]++;
@@ -311,7 +321,7 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 	return received_packets;
 }
 
-void rmnet_mhi_tx_cb(mhi_rmnet_result *cb_info)
+void rmnet_mhi_tx_cb(mhi_result *cb_info)
 {
 	struct net_device *dev = (struct net_device *)cb_info->user_data;
 	struct rmnet_mhi_private *rmnet_mhi_ptr = netdev_priv(dev);
@@ -319,7 +329,7 @@ void rmnet_mhi_tx_cb(mhi_rmnet_result *cb_info)
 
 	tx_interrupts_count[rmnet_mhi_ptr->dev_index]++;
 
-	if (0 == cb_info->payload || 0 == cb_info->bytes_xferd) {
+	if (0 == cb_info->payload_buf || 0 == cb_info->bytes_xferd) {
 		return;
 	}
 
@@ -332,10 +342,10 @@ void rmnet_mhi_tx_cb(mhi_rmnet_result *cb_info)
 		struct sk_buff *skb = skb_dequeue(&(rmnet_mhi_ptr->tx_buffers));
 		if (0 == skb) {
 			/* Indicates an error and MHI Core should be reset */
-			MHI_RMNET_STATUS ret;
-			ret = mhi_rmnet_reset_channel(
+			MHI_STATUS ret;
+			ret = mhi_reset_channel(
 				rmnet_mhi_ptr->tx_client_handle);
-			if (MHI_RMNET_STATUS_SUCCESS != ret) {
+			if (MHI_STATUS_SUCCESS != ret) {
 				pr_err("%s: Channel reset failed, error %d",
 				       __func__, ret);
 				/* TODO: How do we handle this error? */
@@ -365,7 +375,7 @@ void rmnet_mhi_tx_cb(mhi_rmnet_result *cb_info)
 
 			/* The payload is expected to be the physical address.
 			   Comparing to see if it's the last skb to replenish */
-			if (dma_addr == (dma_addr_t)(uintptr_t)cb_info->payload)
+			if (dma_addr == (dma_addr_t)(uintptr_t)cb_info->payload_buf)
 				break;
 		}
 	} /* While TX queue is not empty */
@@ -383,7 +393,7 @@ void rmnet_mhi_tx_cb(mhi_rmnet_result *cb_info)
 
 }
 
-void rmnet_mhi_rx_cb(mhi_rmnet_result *cb_info)
+void rmnet_mhi_rx_cb(mhi_result *cb_info)
 {
 	struct net_device *dev = (struct net_device *)cb_info->user_data;
 	struct rmnet_mhi_private *rmnet_mhi_ptr = netdev_priv(dev);
@@ -391,7 +401,7 @@ void rmnet_mhi_rx_cb(mhi_rmnet_result *cb_info)
 	rx_interrupts_count[rmnet_mhi_ptr->dev_index]++;
 
 	/* Disable interrupts */
-	mhi_rmnet_mask_irq(rmnet_mhi_ptr->rx_client_handle);
+	mhi_mask_irq(rmnet_mhi_ptr->rx_client_handle);
 
 	/* We need to start a watchdog here, not sure how to do that yet */
 
@@ -426,12 +436,12 @@ void rmnet_mhi_reset_cb(void *user_data)
 
 }
 
-static mhi_rmnet_client_info tx_cbs = { rmnet_mhi_tx_cb, rmnet_mhi_reset_cb, 1};
-static mhi_rmnet_client_info rx_cbs = { rmnet_mhi_rx_cb, rmnet_mhi_reset_cb, 1};
+static mhi_client_info_t tx_cbs = { rmnet_mhi_tx_cb, rmnet_mhi_reset_cb, 1};
+static mhi_client_info_t rx_cbs = { rmnet_mhi_rx_cb, rmnet_mhi_reset_cb, 1};
 static int mhi_rmnet_initialized = 0;
 static int rmnet_mhi_open(struct net_device *dev)
 {
-	MHI_RMNET_STATUS res = MHI_RMNET_STATUS_reserved;
+	MHI_STATUS res = MHI_STATUS_reserved;
 	struct rmnet_mhi_private *rmnet_mhi_ptr = netdev_priv(dev);
 	int index = 0;
 
@@ -443,26 +453,24 @@ static int rmnet_mhi_open(struct net_device *dev)
 	pr_info("%s(): First time channel open", __func__);
 	mhi_rmnet_initialized = 1;
 
-	res = mhi_rmnet_open_channel(
+	res = mhi_open_channel(
 		&(rmnet_mhi_ptr->tx_client_handle),
-		rmnet_mhi_ptr->tx_channel,
-		(void *)dev,
-		&tx_cbs);
+		rmnet_mhi_ptr->tx_channel, 0,
+		&tx_cbs, (void *)dev);
 
-	if (MHI_RMNET_STATUS_SUCCESS != res) {
+	if (MHI_STATUS_SUCCESS != res) {
 		rmnet_mhi_ptr->tx_client_handle = 0;
 		pr_err("%s: mhi_open_channel failed for TX, error is %d",
 		       __func__, res);
 		goto cleanup;
 	}
 
-	res = mhi_rmnet_open_channel(
+	res = mhi_open_channel(
 		&(rmnet_mhi_ptr->rx_client_handle),
-		rmnet_mhi_ptr->rx_channel,
-		(void *)dev,
-		&rx_cbs);
+		rmnet_mhi_ptr->rx_channel, 0,
+		&rx_cbs, (void *)dev);
 
-	if (MHI_RMNET_STATUS_SUCCESS != res) {
+	if (MHI_STATUS_SUCCESS != res) {
 		rmnet_mhi_ptr->rx_client_handle = 0;
 		pr_err("%s: mhi_open_channel failed for RX, error is %d",
 		       __func__, res);
@@ -471,10 +479,10 @@ static int rmnet_mhi_open(struct net_device *dev)
 	}
 
 	rmnet_mhi_ptr->tx_buffers_max =
-		mhi_rmnet_get_max_buffers(
+		mhi_get_max_buffers(
 			rmnet_mhi_ptr->tx_client_handle);
 	rmnet_mhi_ptr->rx_buffers_max =
-		mhi_rmnet_get_max_buffers(
+		mhi_get_max_buffers(
 			rmnet_mhi_ptr->rx_client_handle);
 
 	skb_queue_head_init(&(rmnet_mhi_ptr->tx_buffers));
@@ -561,12 +569,12 @@ static int rmnet_mhi_open(struct net_device *dev)
 	for (index = 0; index < rmnet_mhi_ptr->rx_buffers_max; index++) {
 		struct sk_buff *skb = skb_dequeue(&(rmnet_mhi_ptr->rx_buffers));
 		/* TODO: Rework the casting here */
-		res = mhi_rmnet_queue_buffer(
+		res = mhi_queue_xfer(
 			rmnet_mhi_ptr->rx_client_handle,
 			(uintptr_t)(*(uintptr_t *)(skb->cb)),
-			rmnet_mhi_ptr->mru);
-		if (MHI_RMNET_STATUS_SUCCESS != res) {
-			pr_err("%s: mhi_queue_buffer failed, error %d",
+			rmnet_mhi_ptr->mru, 0, 0);
+		if (MHI_STATUS_SUCCESS != res) {
+			pr_err("%s: mhi_queue_xfer failed, error %d",
 			       __func__, res);
 			/* TODO: Handle this error. Do we reset the MHI Core? */
 			goto cleanup;
@@ -581,10 +589,10 @@ static int rmnet_mhi_open(struct net_device *dev)
 
 cleanup:
 	if (0 != rmnet_mhi_ptr->tx_client_handle)
-		mhi_rmnet_close_channel(rmnet_mhi_ptr->tx_client_handle);
+		mhi_close_channel(rmnet_mhi_ptr->tx_client_handle);
 
 	if (0 != rmnet_mhi_ptr->rx_client_handle)
-		mhi_rmnet_close_channel(rmnet_mhi_ptr->rx_client_handle);
+		mhi_close_channel(rmnet_mhi_ptr->rx_client_handle);
 
   /* Clean TX bounce buffers */
 	rmnet_mhi_internal_clean_unmap_buffers(dev,
@@ -629,7 +637,7 @@ static int rmnet_mhi_change_mtu(struct net_device *dev, int new_mtu)
 static int rmnet_mhi_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct rmnet_mhi_private *rmnet_mhi_ptr = netdev_priv(dev);
-	MHI_RMNET_STATUS res = MHI_RMNET_STATUS_reserved;
+	MHI_STATUS res = MHI_STATUS_reserved;
 	dma_addr_t dma_addr;
 	bool bounce_buffer_used = false;
 
@@ -676,21 +684,21 @@ static int rmnet_mhi_xmit(struct sk_buff *skb, struct net_device *dev)
 		tx_priv->is_bounce_buffer = false;
 	}
 
-	res = mhi_rmnet_queue_buffer(rmnet_mhi_ptr->tx_client_handle,
-				     (uintptr_t)(dma_addr), skb->len);
+	res = mhi_queue_xfer(rmnet_mhi_ptr->tx_client_handle,
+				     (uintptr_t)(dma_addr), skb->len, 0, 0);
 
-	if (MHI_RMNET_STATUS_RING_FULL == res) {
+	if (MHI_STATUS_RING_FULL == res) {
 		/* Need to stop writing until we can write again */
 		tx_ring_full_count[rmnet_mhi_ptr->dev_index]++;
 		netif_stop_queue(dev);
 			goto rmnet_mhi_xmit_error_cleanup;
 	}
 
-	if (MHI_RMNET_STATUS_SUCCESS != res) {
+	if (MHI_STATUS_SUCCESS != res) {
 		/* A more fatal error? */
 		/* TODO: Is this what we want to do in case of an error here? */
 		netif_stop_queue(dev);
-		pr_err("%s: mhi_queue_buffer failed, error %d", __func__, res);
+		pr_err("%s: mhi_queue_xfer failed, error %d", __func__, res);
 		goto rmnet_mhi_xmit_error_cleanup;
 	}
 
@@ -742,7 +750,7 @@ static int rmnet_mhi_ioctl_extended(struct net_device *dev, struct ifreq *ifr)
 	case RMNET_IOCTL_GET_EPID:
 		/* TODO: TX or RX handle? */
 		ext_cmd.u.data =
-			mhi_rmnet_get_epid(rmnet_mhi_ptr->tx_client_handle);
+			mhi_get_epid(rmnet_mhi_ptr->tx_client_handle);
 		break;
 	case RMNET_IOCTL_GET_SUPPORTED_FEATURES:
 		ext_cmd.u.data = 0;
@@ -829,7 +837,7 @@ static void rmnet_mhi_setup(struct net_device *dev)
 	dev->watchdog_timeo = WATCHDOG_TIMEOUT;
 }
 
-int rmnet_mhi_probe(struct pci_dev *dev)
+int rmnet_mhi_probe(struct platform_device *dev)
 {
 	int ret = 0, index = 0, cleanup_index = 0;
 	struct rmnet_mhi_private *rmnet_mhi_ptr = 0;
@@ -871,10 +879,10 @@ int rmnet_mhi_probe(struct pci_dev *dev)
 			rmnet_mhi_ptr->allocation_flags = GFP_DMA;
 		}
 
-		rmnet_mhi_ptr->tx_channel = MHI_RMNET_CLIENT_IP_HW_0_OUT +
-				(MHI_RMNET_HW_CLIENT_CHANNEL)(index * 2);
-		rmnet_mhi_ptr->rx_channel = MHI_RMNET_CLIENT_IP_HW_0_IN +
-				(MHI_RMNET_HW_CLIENT_CHANNEL)((index * 2));
+		rmnet_mhi_ptr->tx_channel = MHI_CLIENT_IP_HW_0_OUT +
+				(MHI_CLIENT_CHANNEL)(index * 2);
+		rmnet_mhi_ptr->rx_channel = MHI_CLIENT_IP_HW_0_IN +
+				(MHI_CLIENT_CHANNEL)((index * 2));
 		rmnet_mhi_ptr->tx_client_handle = 0;
 		rmnet_mhi_ptr->rx_client_handle = 0;
 		rmnet_mhi_ptr->mru = MHI_DEFAULT_MRU;
@@ -908,8 +916,13 @@ fail:
 	return ret;
 }
 
-int rmnet_mhi_remove(struct pci_dev *dev)
+static int rmnet_mhi_remove(struct platform_device *dev)
 {
-	//platform_driver_unregister(&mhi_rmnet_driver);
+	platform_driver_unregister(&mhi_rmnet_driver);
 	return 0;
+}
+
+int rmnet_mhi_init(void)
+{
+	return platform_driver_register(&mhi_rmnet_driver);
 }
