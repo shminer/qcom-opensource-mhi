@@ -118,7 +118,8 @@ enum hrtimer_restart mhi_initiate_M1(struct hrtimer *timer)
 	/* We will allow M1 if no data is pending, the current
 	 * state is M0 and no M3 transition is pending */
 	if (0 == atomic_read(&mhi_dev_ctxt->data_pending) &&
-			MHI_STATE_M0 == mhi_dev_ctxt->mhi_state &&
+			(MHI_STATE_M0 == mhi_dev_ctxt->mhi_state ||
+			 MHI_STATE_M1 == mhi_dev_ctxt->mhi_state) &&
 			0 == mhi_dev_ctxt->pending_M3) {
 		mhi_dev_ctxt->mhi_state = MHI_STATE_M1;
 		ret_val = gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 0);

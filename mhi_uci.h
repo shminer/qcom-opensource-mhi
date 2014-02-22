@@ -12,7 +12,7 @@
 #ifndef _H_MHI_SHIM_INTERFACE
 #define _H_MHI_SHIM_INTERFACE
 
-#include "mhi_shim.h"
+#include <msm_mhi.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/completion.h>
@@ -26,13 +26,14 @@
 #include <linux/slab.h>
 #include <linux/poll.h>
 #include <linux/sched.h>
+#include <linux/platform_device.h>
 
 #define MIN(_x, _y)(((_x) < (_y)) ? (_x) : (_y))
 #define MHI_DEV_NODE_NAME_LEN 13
 #define MHI_MAX_NR_OF_CLIENTS 23
 #define MHI_SOFTWARE_CLIENT_START 0
 #define MHI_SOFTWARE_CLIENT_LIMIT 23
-#define MHI_MAX_SOFTWARE_CHANNELS (MHI_SOFTWARE_CLIENT_LIMIT * 2)
+#define MHI_MAX_SOFTWARE_CHANNELS 46
 
 #define MAX_NR_TRBS_PER_CHAN 10
 #define MHI_PCIE_VENDOR_ID 0x17CB
@@ -51,15 +52,15 @@ typedef enum SHIM_DBG_LEVEL {
 	SHIM_DBG_reserved = 0x80000000
 } SHIM_DBG_LEVEL;
 
-extern SHIM_DBG_LEVEL mhi_shim_msg_lvl;
+extern SHIM_DBG_LEVEL mhi_uci_msg_lvl;
 
-#define mhi_shim_log(_msg_lvl, _msg, ...) do { \
-	if (_msg_lvl >= mhi_shim_msg_lvl) { \
+#define mhi_uci_log(_msg_lvl, _msg, ...) do { \
+	if (_msg_lvl >= mhi_uci_msg_lvl) { \
 		pr_info("[%s] "_msg, __func__, ##__VA_ARGS__); \
 	} \
 } while (0)
 
-typedef struct mhi_shim_ctxt_t mhi_shim_ctxt_t;
+typedef struct mhi_uci_ctxt_t mhi_uci_ctxt_t;
 typedef enum MHI_SHIM_DEBUG_LEVEL {
 	MHI_DBG_VERBOSE = 0x0,
 	MHI_DBG_INFO = 0x1,
@@ -80,7 +81,7 @@ typedef enum MHI_CHAN_DIR {
 
 
 typedef struct chan_attr {
-	MHI_SHIM_CLIENT_CHANNEL chan_id;
+	MHI_CLIENT_CHANNEL chan_id;
 	size_t max_packet_size;
 	size_t avg_packet_size;
 	u32 max_nr_packets;
@@ -88,36 +89,36 @@ typedef struct chan_attr {
 	MHI_CHAN_DIR dir;
 } chan_attr;
 
-typedef struct shim_client {
+typedef struct uci_client {
 	u32 client_index;
 	u32 out_chan;
 	u32 in_chan;
-	mhi_shim_client_handle outbound_handle;
-	mhi_shim_client_handle inbound_handle;
-	mhi_shim_ctxt_t *shim_ctxt;
+	mhi_client_handle* outbound_handle;
+	mhi_client_handle* inbound_handle;
+	size_t pending_data;
+	mhi_uci_ctxt_t *uci_ctxt;
 	wait_queue_head_t read_wait_queue;
 	atomic_t avail_pkts;
 	struct device *dev;
-	u32 bytes_copied;
-} shim_client;
+} uci_client;
 
-typedef struct mhi_shim_ctxt_t {
+typedef struct mhi_uci_ctxt_t {
 	chan_attr channel_attributes[MHI_MAX_SOFTWARE_CHANNELS];
-	shim_client client_handle_list[MHI_SOFTWARE_CLIENT_LIMIT];
+	uci_client client_handle_list[MHI_SOFTWARE_CLIENT_LIMIT];
 	struct mutex client_chan_lock[MHI_MAX_SOFTWARE_CHANNELS];
-	mhi_shim_client_info_t client_info;
+	mhi_client_info_t client_info;
 	dev_t start_ctrl_nr;
 	struct cdev cdev[MHI_MAX_SOFTWARE_CHANNELS];
-	struct class *mhi_shim_class;
-} mhi_shim_ctxt_t;
+	struct class *mhi_uci_class;
+} mhi_uci_ctxt_t;
 
-void shim_xfer_cb(mhi_shim_result *result);
-int mhi_shim_send_packet(mhi_shim_client_handle *client_handle, void *buf,
+void uci_xfer_cb(mhi_result *result);
+int mhi_uci_send_packet(mhi_client_handle *client_handle, void *buf,
 		u32 size, u32 chan);
-MHI_SHIM_STATUS mhi_init_inbound(mhi_shim_client_handle *mhi_shim_ctxt,
-		MHI_SHIM_CLIENT_CHANNEL chan);
-MHI_SHIM_STATUS shim_init_client_attributes(mhi_shim_ctxt_t *mhi_shim_ctxt);
-int mhi_shim_probe(struct pci_dev *dev);
-int mhi_shim_remove(struct pci_dev *dev);
+MHI_STATUS mhi_init_inbound(mhi_client_handle *client_handle,
+		MHI_CLIENT_CHANNEL chan);
+MHI_STATUS uci_init_client_attributes(mhi_uci_ctxt_t *mhi_uci_ctxt);
+int mhi_uci_probe(struct platform_device *dev);
+int mhi_uci_remove(struct platform_device *dev);
 
 #endif

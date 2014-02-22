@@ -13,12 +13,14 @@
 #ifndef _H_MHI
 #define _H_MHI
 
+#include <msm_mhi.h>
 #include "mhi_macros.h"
 #include <linux/types.h>
 #include <linux/spinlock_types.h>
 #include <linux/hrtimer.h>
 #include <linux/pm.h>
 #include <linux/completion.h>
+
 
 typedef struct osal_thread osal_thread;
 typedef struct mhi_meminfo mhi_meminfo;
@@ -57,83 +59,6 @@ typedef struct pcie_core_info {
 	u32 irq_base;
 	u32 max_nr_msis;
 } pcie_core_info;
-
-typedef enum MHI_STATUS {
-	MHI_STATUS_SUCCESS = 0,
-	MHI_STATUS_ERROR = 1,
-	MHI_STATUS_DEV_NOT_FOUND = 2,
-	MHI_STATUS_RING_FULL = 3,
-	MHI_STATUS_RING_EMPTY = 4,
-	MHI_STATUS_ALLOC_ERROR = 5,
-	MHI_STATUS_OBJ_BUSY = 6,
-	MHI_STATUS_DEVICE_NOT_READY = 7,
-	MHI_STATUS_INACTIVE = 8,
-	MHI_STATUS_BAD_STATE = 9,
-	MHI_STATUS_CHAN_NOT_READY = 10,
-	MHI_STATUS_CMD_PENDING = 11,
-	MHI_STATUS_LINK_DOWN = 12,
-	MHI_STATUS_ALREADY_REGISTERED = 13,
-	MHI_STATUS_USERSPACE_MEM_ERR = 14,
-	MHI_STATUS_BAD_HANDLE = 15,
-	MHI_STATUS_INVALID_CHAN_ERR = 16,
-	MHI_STATUS_reserved = 0x80000000
-} MHI_STATUS;
-
-typedef enum MHI_CLIENT_CHANNEL {
-	MHI_CLIENT_LOOPBACK_OUT = 0,
-	MHI_CLIENT_LOOPBACK_IN = 1,
-	MHI_CLIENT_SAHARA_OUT = 2,
-	MHI_CLIENT_SAHARA_IN = 3,
-	MHI_CLIENT_DIAG_OUT = 4,
-	MHI_CLIENT_DIAG_IN = 5,
-	MHI_CLIENT_SSR_OUT = 6,
-	MHI_CLIENT_SSR_IN = 7,
-	MHI_CLIENT_QDSS_OUT = 8,
-	MHI_CLIENT_QDSS_IN = 9,
-	MHI_CLIENT_EFS_OUT = 10,
-	MHI_CLIENT_EFS_IN = 11,
-	MHI_CLIENT_MBIM_OUT = 12,
-	MHI_CLIENT_MBIM_IN = 13,
-	MHI_CLIENT_QMI_OUT = 14,
-	MHI_CLIENT_QMI_IN = 15,
-	MHI_CLIENT_IP_CTRL_0_OUT = 16,
-	MHI_CLIENT_IP_CTRL_0_IN = 17,
-	MHI_CLIENT_IP_CTRL_1_OUT = 18,
-	MHI_CLIENT_IP_CTRL_1_IN = 19,
-	MHI_CLIENT_IP_CTRL_2_OUT = 20,
-	MHI_CLIENT_IP_CTRL_2_IN = 21,
-	MHI_CLIENT_IP_CTRL_3_OUT = 22,
-	MHI_CLIENT_IP_CTRL_3_IN = 23,
-	MHI_CLIENT_IP_CTRL_4_OUT = 24,
-	MHI_CLIENT_IP_CTRL_4_IN = 25,
-	MHI_CLIENT_IP_CTRL_5_OUT = 26,
-	MHI_CLIENT_IP_CTRL_5_IN = 27,
-	MHI_CLIENT_IP_CTRL_6_OUT = 28,
-	MHI_CLIENT_IP_CTRL_6_IN = 29,
-	MHI_CLIENT_IP_CTRL_7_OUT = 30,
-	MHI_CLIENT_IP_CTRL_7_IN = 31,
-	MHI_CLIENT_DUN_OUT = 32,
-	MHI_CLIENT_DUN_IN = 33,
-	MHI_CLIENT_IP_SW_0_OUT = 34,
-	MHI_CLIENT_IP_SW_0_IN = 35,
-	MHI_CLIENT_IP_SW_1_OUT = 36,
-	MHI_CLIENT_IP_SW_1_IN = 37,
-	MHI_CLIENT_IP_SW_2_OUT = 38,
-	MHI_CLIENT_IP_SW_2_IN = 39,
-	MHI_CLIENT_IP_SW_3_OUT = 40,
-	MHI_CLIENT_IP_SW_3_IN = 41,
-	MHI_CLIENT_CSVT_OUT = 42,
-	MHI_CLIENT_CSVT_IN = 43,
-	MHI_CLIENT_SMCT_OUT = 44,
-	MHI_CLIENT_SMCT_IN = 45,
-	MHI_CLIENT_RESERVED_1_LOWER = 46,
-	MHI_CLIENT_RESERVED_1_UPPER = 99,
-	MHI_CLIENT_IP_HW_0_OUT = 100,
-	MHI_CLIENT_IP_HW_0_IN = 101,
-	MHI_CLIENT_RESERVED_2_LOWER = 102,
-	MHI_CLIENT_RESERVED_2_UPPER = 127,
-	MHI_MAX_CHANNELS = 102
-} MHI_CLIENT_CHANNEL;
 
 typedef struct bhi_ctxt_t {
 	uintptr_t bhi_base;
@@ -290,7 +215,6 @@ typedef struct mhi_stop_chan_cmd_pkt {
 	u32 reserved3;
 	u32 info;
 } mhi_stop_chan_cmd_pkt;
-
 typedef struct mhi_ee_state_change_event {
 	u64 reserved1;
 	u32 exec_env;
@@ -406,10 +330,23 @@ typedef enum MHI_EXEC_ENV {
 	MHI_EXEC_ENV_SBL = 0x1,
 	MHI_EXEC_ENV_AMSS = 0x2,
 } MHI_EXEC_ENV;
-
 typedef struct mhi_state_work_item {
 	MHI_STATE_TRANSITION new_state;
 } mhi_state_work_item;
+
+typedef struct mhi_client_handle {
+	mhi_device_ctxt *mhi_dev_ctxt;
+	mhi_client_info_t client_info;
+	struct completion chan_close_complete;
+	void *user_data;
+	u32 chan;
+	mhi_result result;
+	u32 device_index;
+	u32 event_ring_index;
+	u32 msi_vec;
+	u32 cb_mod;
+	u32 pkt_count;
+} mhi_client_handle;
 
 typedef enum MHI_EVENT_POLLING {
 	MHI_EVENT_POLLING_DISABLED = 0x0,
@@ -434,38 +371,11 @@ typedef struct mhi_control_seg {
 	u32 padding;
 } mhi_control_seg;
 
-typedef struct mhi_result {
-	void *user_data;
-	void *payload_buf;
-	u32 bytes_xferd;
-	MHI_STATUS transaction_status;
-} mhi_result;
-
 typedef struct mhi_counters {
 	u32 pkts_to_dev;
 	u32 pkts_from_dev;
 	u32 ev_processed;
 } mhi_counters;
-
-typedef struct mhi_client_info_t {
-	void (*mhi_xfer_cb)(mhi_result *);
-	void (*mhi_chan_reset_cb)(void *user_data);
-	u32 cb_mod;
-} mhi_client_info_t;
-
-typedef struct mhi_client_handle {
-	mhi_device_ctxt *mhi_dev_ctxt;
-	mhi_client_info_t client_info;
-	struct completion chan_close_complete;
-	void *user_data;
-	u32 chan;
-	mhi_result result;
-	u32 device_index;
-	u32 event_ring_index;
-	u32 msi_vec;
-	u32 cb_mod;
-	u32 pkt_count;
-} mhi_client_handle;
 
 struct mhi_device_ctxt {
 	mhi_pcie_dev_info *dev_info;
@@ -501,7 +411,8 @@ struct mhi_device_ctxt {
 
 	MHI_THREAD_STATE event_thread_state;
 	MHI_THREAD_STATE state_change_thread_state;
-
+	struct platform_device *mhi_uci_dev;
+	struct platform_device *mhi_rmnet_dev;
 
 	volatile u32 kill_threads;
 	mhi_state_work_queue state_change_work_item_list;
@@ -570,8 +481,6 @@ MHI_STATUS mhi_queue_tx_pkt(mhi_device_ctxt *mhi_dev_ctxt,
 				MHI_CLIENT_CHANNEL chan,
 				void *payload,
 				size_t payload_size);
-MHI_STATUS mhi_reset_channel(mhi_device_ctxt *mhi_dev_ctxt, u32 chan_id);
-
 MHI_STATUS mhi_cmd_ring_init(mhi_cmd_ctxt *cmd_ring_id,
 			uintptr_t trb_list_phy, uintptr_t trb_list_virt,
 			size_t el_per_ring, mhi_ring *ring);
@@ -617,22 +526,9 @@ MHI_STATUS validate_ev_el_addr(mhi_ring *ring, uintptr_t addr);
 MHI_STATUS mhi_spawn_threads(mhi_device_ctxt *mhi_dev_ctxt);
 
 void assert_device_wake(void);
-void mhi_mask_irq(mhi_client_handle *client_handle);
-void mhi_unmask_irq(mhi_client_handle *client_handle);
-mhi_result *mhi_poll(mhi_client_handle *client_handle);
-MHI_STATUS mhi_open_channel(mhi_client_handle **client_handle,
-		MHI_CLIENT_CHANNEL chan, s32 device_index,
-		mhi_client_info_t *cbs, void *user_data);
-void mhi_close_channel(mhi_client_handle *client_handle);
-MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
-		uintptr_t buf, size_t buf_len, u32 chain, u32 eob);
-MHI_STATUS mhi_client_recycle_trb(mhi_client_handle *client_handle);
-void mhi_poll_inbound(mhi_client_handle *client_handle,
-			uintptr_t *buf, ssize_t *buf_size);
-int get_free_trbs(mhi_client_handle *client_handle);
+
 MHI_STATUS reset_chan_cmd(mhi_device_ctxt *mhi_dev_ctxt, mhi_cmd_pkt *cmd_pkt);
 MHI_STATUS start_chan_cmd(mhi_device_ctxt *mhi_dev_ctxt, mhi_cmd_pkt *cmd_pkt);
-
 MHI_STATUS parse_outbound(mhi_device_ctxt *mhi_dev_ctxt, u32 chan,
 			mhi_xfer_pkt *local_ev_trb_loc, u16 xfer_len);
 MHI_STATUS parse_inbound(mhi_device_ctxt *mhi_dev_ctxt, u32 chan,
