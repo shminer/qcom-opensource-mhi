@@ -93,6 +93,7 @@ int mhi_state_change_thread(void *ctxt)
 			mutex_lock(work_q->q_mutex);
 			if (work_q->q_info.rp == work_q->q_info.wp) {
 				mutex_unlock(work_q->q_mutex);
+				empty_ring = 1;
 			} else {
 				empty_ring = 0;
 				cur_work_item =
