@@ -226,8 +226,8 @@ static ssize_t mhi_uci_client_read(struct file *file, char __user *buf,
 		mhi_uci_log(UCI_DBG_VERBOSE,
 			"Obtained pkt of size 0x%x at addr 0x%lx, chan 0x%x\n",
 			phy_buf_size, (uintptr_t)phy_buf, chan);
-		if (0 == phy_buf || 0 == phy_buf_size ||
-				atomic_read(&uci_handle->avail_pkts) <= 0) {
+		if ((0 == phy_buf || 0 == phy_buf_size) &&
+				(atomic_read(&uci_handle->avail_pkts) <= 0)) {
 			/* If nothing was copied yet, wait for data */
 			mhi_uci_log(UCI_DBG_VERBOSE,
 					"No data avail_pkts %d, chan %d\n",
@@ -236,10 +236,38 @@ static ssize_t mhi_uci_client_read(struct file *file, char __user *buf,
 			wait_event_interruptible(
 				uci_handle->read_wait_queue,
 				(atomic_read(&uci_handle->avail_pkts) > 0));
+		} else if ((atomic_read(&uci_handle->avail_pkts) > 0) &&
+			    0 == phy_buf && 0 == phy_buf_size &&
+			    uci_handle->mhi_status == -ENETRESET) {
+			mhi_uci_log(UCI_DBG_VERBOSE,
+				"Detected pending reset, reporting to client\n");
+			atomic_dec(&uci_handle->avail_pkts);
+			uci_handle->mhi_status = 0;
+			mutex_unlock(mutex);
+			return -ENETRESET;
+		} else if (atomic_read(&uci_handle->avail_pkts) &&
+			   phy_buf != 0 && phy_buf_size != 0) {
+			mhi_uci_log(UCI_DBG_VERBOSE,
+			"Got packet: avail pkts %d phy_adr 0x%lx, chan %d\n",
+					atomic_read(&uci_handle->avail_pkts),
+					phy_buf,
+					chan);
+			break;
+		} else {
+			mhi_uci_log(UCI_DBG_CRITICAL,
+			"error: avail pkts %d phy_adr 0x%lx, chan %d\n",
+					atomic_read(&uci_handle->avail_pkts),
+					phy_buf,
+					chan);
+			return -EIO;
 		}
 	} while (!phy_buf);
 
 	pkt_loc = dma_to_virt(NULL, (dma_addr_t)(uintptr_t)phy_buf);
+	mhi_uci_log(UCI_DBG_VERBOSE, "Mapped DMA for client avail_pkts:%d virt_adr 0x%p, chan %d\n",
+					atomic_read(&uci_handle->avail_pkts),
+					pkt_loc,
+					chan);
 	if (*bytes_pending == 0) {
 		*bytes_pending = phy_buf_size;
 		dma_unmap_single(NULL,
@@ -322,6 +350,12 @@ static ssize_t mhi_uci_client_write(struct file *file,
 		return -EINVAL;
 	else
 		uci_handle = (uci_client *)file->private_data;
+	if (atomic_read(&mhi_uci_ctxt.mhi_disabled))
+	{
+		mhi_uci_log(UCI_DBG_VERBOSE,
+			"Client attempted to write while MHI is disabled.\n");
+		return -EIO;
+	}
 	chan = uci_handle->out_chan;
 	mutex_lock(&uci_handle->uci_ctxt->client_chan_lock[chan]);
 	ret_val = mhi_uci_send_packet(uci_handle->outbound_handle,
@@ -348,7 +382,7 @@ int mhi_uci_probe(struct platform_device *dev)
 	uci_client *curr_client = NULL;
 	s32 r = 0;
 
-	mhi_uci_ctxt.client_info.mhi_xfer_cb = uci_xfer_cb;
+	mhi_uci_ctxt.client_info.mhi_client_cb = uci_xfer_cb;
 	mhi_uci_ctxt.client_info.cb_mod = 1;
 
 	for (i = 0; i < MHI_MAX_SOFTWARE_CHANNELS; ++i)
@@ -362,6 +396,7 @@ int mhi_uci_probe(struct platform_device *dev)
 		return -EIO;
 	}
 	mhi_uci_ctxt.ctrl_chan_id = MHI_CLIENT_IP_CTRL_1_OUT;
+	mhi_uci_log(UCI_DBG_VERBOSE, "Initializing clients\n");
 
 	for (i = 0; i < MHI_SOFTWARE_CLIENT_LIMIT; ++i) {
 		curr_client = &mhi_uci_ctxt.client_handle_list[i];
@@ -514,8 +549,8 @@ int mhi_uci_send_packet(mhi_client_handle *client_handle,
 		chain = (data_left_to_insert - data_to_insert_now > 0) ? 1 : 0;
 		eob = chain;
 		mhi_uci_log(UCI_DBG_VERBOSE,
-				"At trb i = %d/%d, chain = %d, eob = %d\n", i,
-				nr_avail_trbs, chain, eob);
+				"At trb i = %d/%d, chain = %d, eob = %d, addr 0x%lx\n", i,
+				nr_avail_trbs, chain, eob, (uintptr_t)dma_addr);
 		ret_val = mhi_queue_xfer(client_handle, dma_addr,
 				data_to_insert_now, chain, eob);
 		if (0 != ret_val) {
@@ -607,28 +642,73 @@ error_insert:
 	return MHI_STATUS_ERROR;
 }
 
-void uci_xfer_cb(mhi_result *result)
+void uci_xfer_cb(mhi_cb_info *cb_info)
 {
-	u32 chan_nr = (u32)result->user_data;
+	u32 chan_nr;
 	uci_client *uci_handle = NULL;
-	u32 client_index = chan_nr / 2;
+	u32 client_index;
+	mhi_result *result;
 
-	if (chan_nr % 2) {
-		uci_handle =
-			&mhi_uci_ctxt.client_handle_list[client_index];
-		atomic_inc(&uci_handle->avail_pkts);
+	switch (cb_info->cb_reason) {
+
+	case MHI_CB_MHI_ENABLED :
+	{
+		mhi_uci_log(UCI_DBG_CRITICAL, "Enabling MHI.\n");
+		atomic_set(&mhi_uci_ctxt.mhi_disabled, 0);
+	}
+	break;
+	case MHI_CB_MHI_DISABLED :
+	{
+		u32 i = 0;
+		if (!atomic_cmpxchg(&mhi_uci_ctxt.mhi_disabled, 0, 1)) {
+			for (i = 0; i < MHI_MAX_NR_OF_CLIENTS; ++i) {
+				uci_handle =
+					&mhi_uci_ctxt.client_handle_list[i];
+				if (uci_handle->mhi_status != -ENETRESET) {
+					mhi_uci_log(UCI_DBG_CRITICAL, "Setting reset for chan %d.\n", i*2);
+				uci_handle->mhi_status = -ENETRESET;
+				atomic_inc(&uci_handle->avail_pkts);
+				wake_up(&uci_handle->read_wait_queue);
+				} else {
+					mhi_uci_log(UCI_DBG_CRITICAL, "Chan %d state already reset.\n", i*2);
+				}
+			}
+		}
+	}
+	break;
+	case MHI_CB_XFER_SUCCESS:
+	{
+		if (cb_info->result == NULL) {
+			mhi_uci_log(UCI_DBG_CRITICAL,
+				"Failed to obtain mhi result from CB.\n");
+				return;
+		}
+		result = cb_info->result;
+		chan_nr = (u32)result->user_data;
+		client_index = chan_nr / 2;
+		if (chan_nr % 2) {
+			uci_handle =
+				&mhi_uci_ctxt.client_handle_list[client_index];
+			atomic_inc(&uci_handle->avail_pkts);
+			mhi_uci_log(UCI_DBG_VERBOSE,
+				"Received cb on chan 0x%x, avail pkts: 0x%x\n",
+				chan_nr,
+				atomic_read(&uci_handle->avail_pkts));
+			wake_up(&uci_handle->read_wait_queue);
+		} else {
+			dma_unmap_single(NULL,
+					(dma_addr_t)(uintptr_t)result->payload_buf,
+					result->bytes_xferd,
+					DMA_TO_DEVICE);
+			kfree(dma_to_virt(NULL,
+			(dma_addr_t)(uintptr_t)result->payload_buf));
+		}
+		break;
+	}
+	default:
 		mhi_uci_log(UCI_DBG_VERBOSE,
-			"Received cb on chan 0x%x, avail pkts: 0x%x\n",
-			chan_nr,
-			atomic_read(&uci_handle->avail_pkts));
-		wake_up_interruptible(&uci_handle->read_wait_queue);
-	} else {
-		dma_unmap_single(NULL,
-				(dma_addr_t)(uintptr_t)result->payload_buf,
-				result->bytes_xferd,
-				DMA_TO_DEVICE);
-		kfree(dma_to_virt(NULL,
-		(dma_addr_t)(uintptr_t)result->payload_buf));
+			"Cannot handle cb reason 0x%x\n",
+			cb_info->cb_reason);
 	}
 }
 void process_rs232_state(mhi_result *result)

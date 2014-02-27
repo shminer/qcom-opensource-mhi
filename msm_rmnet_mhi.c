@@ -322,15 +322,33 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 	return received_packets;
 }
 
-void rmnet_mhi_tx_cb(mhi_result *cb_info)
+void rmnet_mhi_tx_cb(mhi_cb_info *cb_info)
 {
-	struct net_device *dev = (struct net_device *)cb_info->user_data;
-	struct rmnet_mhi_private *rmnet_mhi_ptr = netdev_priv(dev);
+	struct net_device *dev;
+	struct rmnet_mhi_private *rmnet_mhi_ptr;
 	unsigned long burst_counter = 0;
+	mhi_result* result;
 
+	if (NULL != cb_info && NULL != cb_info->result) {
+		result = cb_info->result;
+		dev = (struct net_device *)result->user_data;
+		rmnet_mhi_ptr = netdev_priv(dev);
+	}
+	switch (cb_info->cb_reason) {
+	case MHI_CB_MHI_DISABLED:
+		pr_err("%s: Got SSR notification %d from MHI CORE. Stopping stack.",
+		       __func__, cb_info->cb_reason);
+		netif_stop_queue(dev);
+		break;
+	case MHI_CB_MHI_ENABLED:
+		pr_err("%s: Got SSR notification %d from MHI CORE. Starting stack.",
+		       __func__, cb_info->cb_reason);
+		netif_start_queue(dev);
+		break;
+	case MHI_CB_XFER_SUCCESS:
 	tx_interrupts_count[rmnet_mhi_ptr->dev_index]++;
 
-	if (0 == cb_info->payload_buf || 0 == cb_info->bytes_xferd) {
+	if (0 == result->payload_buf || 0 == result->bytes_xferd) {
 		return;
 	}
 
@@ -376,7 +394,7 @@ void rmnet_mhi_tx_cb(mhi_result *cb_info)
 
 			/* The payload is expected to be the physical address.
 			   Comparing to see if it's the last skb to replenish */
-			if (dma_addr == (dma_addr_t)(uintptr_t)cb_info->payload_buf)
+			if (dma_addr == (dma_addr_t)(uintptr_t)result->payload_buf)
 				break;
 		}
 	} /* While TX queue is not empty */
@@ -391,14 +409,35 @@ void rmnet_mhi_tx_cb(mhi_result *cb_info)
 
 	/* In case we couldn't write again, now we can! */
 	netif_start_queue(dev);
-
+		break;
+		default:
+			pr_err("%s: Got SSR notification %d from MHI CORE.",
+		       __func__, cb_info->cb_reason);
+			break;
+	}
 }
 
-void rmnet_mhi_rx_cb(mhi_result *cb_info)
+void rmnet_mhi_rx_cb(mhi_cb_info *cb_info)
 {
-	struct net_device *dev = (struct net_device *)cb_info->user_data;
-	struct rmnet_mhi_private *rmnet_mhi_ptr = netdev_priv(dev);
+	struct net_device *dev;
+	struct rmnet_mhi_private *rmnet_mhi_ptr;
+	if (NULL != cb_info && NULL != cb_info->result) {
+		dev = (struct net_device *)cb_info->result->user_data;
+		rmnet_mhi_ptr = netdev_priv(dev);
+	}
 
+	switch(cb_info->cb_reason) {
+		case MHI_CB_XFER_SUCCESS:
+		case MHI_CB_MHI_ENABLED:
+			break;
+		case MHI_CB_MHI_DISABLED:
+			return;
+			break;
+		default:
+			pr_err("%s(): Received bad return code %d from core", __func__,
+					cb_info->cb_reason);
+			break;
+	}
 	rx_interrupts_count[rmnet_mhi_ptr->dev_index]++;
 
 	/* Disable interrupts */
@@ -437,8 +476,8 @@ void rmnet_mhi_reset_cb(void *user_data)
 
 }
 
-static mhi_client_info_t tx_cbs = { rmnet_mhi_tx_cb, rmnet_mhi_reset_cb, 1};
-static mhi_client_info_t rx_cbs = { rmnet_mhi_rx_cb, rmnet_mhi_reset_cb, 1};
+static mhi_client_info_t tx_cbs = { rmnet_mhi_tx_cb, 1};
+static mhi_client_info_t rx_cbs = { rmnet_mhi_rx_cb, 1};
 static int mhi_rmnet_initialized = 0;
 static int rmnet_mhi_open(struct net_device *dev)
 {

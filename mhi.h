@@ -13,6 +13,7 @@
 #ifndef _H_MHI
 #define _H_MHI
 
+#include <mach/msm_pcie.h>
 #include <msm_mhi.h>
 #include "mhi_macros.h"
 #include <linux/types.h>
@@ -72,8 +73,12 @@ typedef struct mhi_pcie_dev_info {
 	pcie_core_info core;
 	atomic_t ref_count;
 	mhi_device_ctxt *mhi_ctxt;
+	struct msm_pcie_register_event mhi_pci_link_event;
 	pci_dev *pcie_device;
+	struct pci_driver *mhi_pcie_driver;
 	bhi_ctxt_t bhi_ctxt;
+	u32 link_down_cntr;
+	u32 link_up_cntr;
 } mhi_pcie_dev_info;
 
 typedef struct mhi_pcie_devices {
@@ -113,6 +118,12 @@ typedef enum MHI_CHAIN {
 	MHI_TRE_CHAIN_LIMIT = 0x2,
 	MHI_TRE_CHAIN_reserved = 0x80000000
 } MHI_CHAIN;
+
+typedef enum MHI_EVENT_RING_STATE {
+	MHI_EVENT_RING_UINIT = 0x0,
+	MHI_EVENT_RING_INIT = 0x1,
+	MHI_EVENT_RING_reserved = 0x80000000
+} MHI_EVENT_RING_STATE;
 
 typedef enum MHI_STATE {
 	MHI_STATE_RESET = 0x0,
@@ -263,6 +274,7 @@ typedef union mhi_event_pkt {
 typedef enum MHI_EVENT_CCS {
 	MHI_EVENT_CC_INVALID = 0x0,
 	MHI_EVENT_CC_SUCCESS = 0x1,
+	MHI_EVENT_CC_EOB = 0x4,
 	MHI_EVENT_CC_EOT = 0x2,
 	MHI_EVENT_CC_UNDEFINED_ERR = 0x10,
 	MHI_EVENT_CC_RING_EL_ERR = 0x11,
@@ -415,6 +427,7 @@ struct mhi_device_ctxt {
 	MHI_CMD_STATUS mhi_chan_pend_cmd_ack[MHI_MAX_CHANNELS];
 	atomic_t data_pending;
 	u32 mhi_initialized;
+	u32 mhi_clients_probed;
 	atomic_t events_pending;
 	atomic_t start_cmd_pending_ack;
 	u32 cmd_ring_order;
@@ -442,6 +455,13 @@ struct mhi_device_ctxt {
 	struct msm_bus_vectors bus_vectors[2];
 	struct msm_bus_paths usecase[2];
 	u32 bus_client;
+	struct esoc_desc *esoc_handle;
+	void *esoc_ssr_handle;
+
+	u32 link_up;
+	u32 clients_probed;
+	STATE_TRANSITION base_state;
+	u32 device_wake;
 };
 
 MHI_STATUS mhi_reset_all_thread_queues(mhi_device_ctxt *mhi_dev_ctxt);
@@ -587,5 +607,8 @@ int mhi_startup_thread(void *ctxt);
 int mhi_get_chan_max_buffers(u32 chan);
 int rmnet_mhi_remove(struct pci_dev *dev);
 void ring_all_cmd_dbs(mhi_device_ctxt *mhi_dev_ctxt);
+int mhi_esoc_register(mhi_device_ctxt* mhi_dev_ctxt);
+void mhi_link_state_cb(struct msm_pcie_notify *notify);
+void mhi_notify_clients(mhi_device_ctxt *mhi_dev_ctxt, MHI_CB_REASON reason);
 
 #endif
