@@ -71,6 +71,10 @@ int mhi_resume(struct pci_dev *pcie_dev)
 			*(mhi_device_ctxt **)((pcie_dev->dev).platform_data);
 	if (NULL == mhi_dev_ctxt)
 		return 0;
+	r = gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
+	if (r)
+		mhi_log(MHI_MSG_ERROR | MHI_DBG_POWER,
+			"Could not set DEVICE WAKE GPIO HIGH\n");
 	mhi_log(MHI_MSG_INFO | MHI_DBG_POWER, "Entered\n");
 	r = msm_pcie_pm_control(MSM_PCIE_RESUME,
 				pcie_dev->bus->number,
@@ -151,6 +155,7 @@ MHI_STATUS mhi_initiate_M3(mhi_device_ctxt *mhi_dev_ctxt)
 	unsigned long flags = 0;
 	u32 i = 0;
 	u32 failed_stop = 1;
+	u32 ret_val = 0;
 
 	mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
 			"Entering...\n");
@@ -187,6 +192,10 @@ MHI_STATUS mhi_initiate_M3(mhi_device_ctxt *mhi_dev_ctxt)
 			"Waiting for M3 completion.\n");
 	wait_event_interruptible(*mhi_dev_ctxt->M3_event,
 			mhi_dev_ctxt->mhi_state == MHI_STATE_M3);
+	ret_val = gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 0);
+	if (ret_val)
+		mhi_log(MHI_MSG_ERROR | MHI_DBG_POWER,
+			"Could not set DEVICE WAKE GPIO LOW\n");
 	mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
 			"M3 completion received\n");
 	return MHI_STATUS_SUCCESS;
