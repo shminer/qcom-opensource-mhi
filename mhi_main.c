@@ -276,10 +276,6 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	mhi_dev_ctxt = client_handle->mhi_dev_ctxt;
 	chan = client_handle->chan;
 
-	if (mhi_dev_ctxt->mhi_ctrl_seg->mhi_cc_list[chan].mhi_chan_state !=
-			MHI_CHAN_STATE_RUNNING)
-		return MHI_STATUS_CHAN_NOT_READY ;
-
 	/* Bump up the vote for pending data */
 	read_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
 
