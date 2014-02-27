@@ -45,8 +45,20 @@ int mhi_suspend(struct pci_dev *pcie_dev, pm_message_t state)
 	if (NULL == mhi_dev_ctxt)
 		return 0;
 
+	if (!mhi_dev_ctxt->link_up)
+	{
+		mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
+			"Link is not up, nothing to do.\n");
+		return 0;
+	}
+	if (mhi_dev_ctxt->mhi_state == MHI_STATE_M0 ||
+	    mhi_dev_ctxt->mhi_state == MHI_STATE_M1 ||
+	    mhi_dev_ctxt->mhi_state == MHI_STATE_M2) {
 	if (0 != mhi_initiate_M3(mhi_dev_ctxt))
 		return -EIO;
+	} else {
+		return 0;
+	}
 
 	ret_val = pci_save_state(pcie_dev);
 	if (ret_val) {
@@ -61,7 +73,7 @@ int mhi_suspend(struct pci_dev *pcie_dev, pm_message_t state)
 		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
 			"Failed to put device in D3 hot ret %d\n", ret_val);
 		return MHI_STATUS_ERROR;
-	}
+		}
 	return 0;
 }
 
@@ -82,7 +94,11 @@ int mhi_resume(struct pci_dev *pcie_dev)
 				"Failed to set power state 0x%x\n", r);
 		return -EIO;
 	}
-	pci_restore_state(pcie_dev);
+	if (!mhi_dev_ctxt->link_up) {
+		mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
+			"Link is not up, nothing to do.\n");
+		return 0;
+	}
 
 	if (mhi_dev_ctxt->pending_M3) {
 		mhi_log(MHI_MSG_CRITICAL,
@@ -169,6 +185,11 @@ int mhi_initiate_M0(mhi_device_ctxt *mhi_dev_ctxt)
 	if (ret_val)
 		mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
 			"Failed to set DEVICE WAKE GPIO ret 0x%d.\n", ret_val);
+	if (!mhi_dev_ctxt->link_up) {
+		mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
+			"Link is not up, nothing to do, quitting.\n");
+		return 0;
+	}
 	if (mhi_dev_ctxt->mhi_state == MHI_STATE_M2) {
 		r = wait_event_interruptible_timeout(*mhi_dev_ctxt->M0_event,
 		mhi_dev_ctxt->mhi_state != MHI_STATE_M2,

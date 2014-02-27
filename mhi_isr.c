@@ -20,6 +20,7 @@ irqreturn_t irq_cb(int irq_number, void *dev_id)
 		*(mhi_device_ctxt **)(mhi_device->platform_data);
 	mhi_client_handle *client_handle;
 	mhi_client_info_t *client_info;
+	mhi_cb_info cb_info;
 
 	if (NULL == mhi_dev_ctxt) {
 		mhi_log(MHI_MSG_ERROR, "Failed to get a proper context\n");
@@ -43,8 +44,14 @@ irqreturn_t irq_cb(int irq_number, void *dev_id)
 		if (likely(NULL != client_handle)) {
 			(client_handle->result).user_data =
 					client_handle->user_data;
-			if (likely(NULL != &client_info->mhi_xfer_cb))
-				client_info->mhi_xfer_cb(&client_handle->result);
+			if (likely(NULL != &client_info->mhi_client_cb))
+			{
+				cb_info.result = &client_handle->result;
+				cb_info.cb_reason = MHI_CB_XFER_SUCCESS;
+				cb_info.result->transaction_status =
+						MHI_STATUS_SUCCESS;
+				client_info->mhi_client_cb(&cb_info);
+			}
 		}
 		break;
 	}

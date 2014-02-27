@@ -47,6 +47,13 @@
 #include <linux/msm-bus.h>
 #include <linux/msm-bus-board.h>
 #include "mhi.h"
+#include <linux/esoc_client.h>
+#include <soc/qcom/subsystem_restart.h>
+#include <soc/qcom/subsystem_notif.h>
+#include <linux/err.h>
+#include <linux/of_device.h>
+#include <linux/of_platform.h>
+#include <linux/of_gpio.h>
 
 extern MHI_DEBUG_LEVEL mhi_msg_lvl;
 extern MHI_DEBUG_CLASS mhi_msg_class;

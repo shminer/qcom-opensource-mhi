@@ -95,6 +95,14 @@ typedef enum MHI_CLIENT_CHANNEL {
 	MHI_MAX_CHANNELS = 102
 } MHI_CLIENT_CHANNEL;
 
+typedef enum MHI_CB_REASON {
+	MHI_CB_XFER_SUCCESS = 0x0,
+	MHI_CB_XFER_ERROR = 0x1,
+	MHI_CB_MHI_DISABLED = 0x4,
+	MHI_CB_MHI_ENABLED = 0x8,
+	MHI_CB_CHAN_RESET_COMPLETE = 0x10,
+	MHI_CB_reserved = 0x80000000,
+} MHI_CB_REASON;
 typedef struct mhi_result {
 	void *user_data;
 	void *payload_buf;
@@ -102,9 +110,12 @@ typedef struct mhi_result {
 	MHI_STATUS transaction_status;
 } mhi_result;
 
+typedef struct mhi_cb_info {
+	mhi_result *result;
+	MHI_CB_REASON cb_reason;
+} mhi_cb_info;
 typedef struct mhi_client_info_t {
-	void (*mhi_xfer_cb)(mhi_result *);
-	void (*mhi_chan_reset_cb)(void *user_data);
+	void (*mhi_client_cb)(mhi_cb_info *);
 	u32 cb_mod;
 	u32 intmod_t;
 } mhi_client_info_t;
