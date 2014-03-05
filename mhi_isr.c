@@ -12,7 +12,7 @@
 #include "mhi_sys.h"
 
 /* @brief Actual MSI callback running in separate thread */
-irq_handler_t irq_cb(int irq_number, void *dev_id)
+irqreturn_t irq_cb(int irq_number, void *dev_id)
 {
 	struct device *mhi_device = ((struct device *)dev_id);
 	u32 client_index;
@@ -23,14 +23,16 @@ irq_handler_t irq_cb(int irq_number, void *dev_id)
 
 	if (NULL == mhi_dev_ctxt) {
 		mhi_log(MHI_MSG_ERROR, "Failed to get a proper context\n");
-		return (irq_handler_t)IRQ_HANDLED;
+		return IRQ_HANDLED;
 	}
+	mhi_dev_ctxt->msi_counter[IRQ_TO_MSI(mhi_dev_ctxt, irq_number)]++;
 	switch (IRQ_TO_MSI(mhi_dev_ctxt, irq_number)) {
 	case 0:
+	case 1:
 		atomic_inc(&mhi_dev_ctxt->events_pending);
 		wake_up(mhi_dev_ctxt->event_handle);
 		break;
-	case 1:
+	case 2:
 	{
 		client_index =
 			mhi_dev_ctxt->alloced_ev_rings[TERTIARY_EVENT_RING];
@@ -46,7 +48,7 @@ irq_handler_t irq_cb(int irq_number, void *dev_id)
 		break;
 	}
 	}
-	return (irq_handler_t)IRQ_HANDLED;
+	return IRQ_HANDLED;
 }
 
 int parse_event_thread(void *ctxt)
@@ -95,14 +97,11 @@ MHI_STATUS mhi_process_event_ring(mhi_device_ctxt *mhi_dev_ctxt,
 	mhi_event_pkt *local_rp = NULL;
 	mhi_event_pkt *device_rp = NULL;
 	mhi_event_pkt event_to_process;
-	spinlock_t *event_spinlock = NULL;
 	mhi_event_ctxt *ev_ctxt = NULL;
 	mhi_ring *local_ev_ctxt = &mhi_dev_ctxt->mhi_local_event_ctxt[ev_index];
-	event_spinlock = &mhi_dev_ctxt->mhi_ev_spinlock_list[ev_index];
 
 	ev_ctxt = &mhi_dev_ctxt->mhi_ctrl_seg->mhi_ec_list[ev_index];
 
-	spin_lock(event_spinlock);
 	device_rp =
 		(mhi_event_pkt *)mhi_p2v_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 						ev_ctxt->mhi_event_read_ptr);
@@ -175,7 +174,6 @@ MHI_STATUS mhi_process_event_ring(mhi_device_ctxt *mhi_dev_ctxt,
 					(u64)ev_ctxt->mhi_event_read_ptr);
 		--event_quota;
 	}
-	spin_unlock(event_spinlock);
 	return MHI_STATUS_SUCCESS;
 }
 
