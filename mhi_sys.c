@@ -13,20 +13,29 @@
 #include "mhi_sys.h"
 MHI_DEBUG_LEVEL mhi_msg_lvl = MHI_MSG_CRITICAL;
 MHI_DEBUG_CLASS mhi_msg_class = MHI_DBG_DATA | MHI_DBG_POWER;
+u32 mhi_performance_mode = 0;
 
 module_param(mhi_msg_lvl , uint, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(mhi_msg_lvl, "dbg lvl");
 
 module_param(mhi_msg_class , uint, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(mhi_msg_class, "dbg class");
+module_param(mhi_performance_mode , uint, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(mhi_performance_mode, "dbg lvl");
 
 static ssize_t mhi_dbgfs_chan_read(struct file *fp, char __user *buf,
 				size_t count, loff_t *offp);
 static ssize_t mhi_dbgfs_state_read(struct file *fp, char __user *buf,
 				size_t count, loff_t *offp);
+static ssize_t mhi_dbgfs_ev_read(struct file *fp, char __user *buf,
+				size_t count, loff_t *offp);
 
 static const struct file_operations mhi_dbgfs_chan_fops = {
 .read = mhi_dbgfs_chan_read,
+.write = NULL,
+};
+static const struct file_operations mhi_dbgfs_ev_fops = {
+.read = mhi_dbgfs_ev_read,
 .write = NULL,
 };
 
@@ -51,6 +60,11 @@ int mhi_init_debugfs(mhi_device_ctxt *mhi_dev_ctxt)
 					mhi_parent_folder,
 					mhi_dev_ctxt,
 					&mhi_dbgfs_chan_fops);
+	mhi_chan_stats = debugfs_create_file("mhi_ev_stats",
+					0444,
+					mhi_parent_folder,
+					mhi_dev_ctxt,
+					&mhi_dbgfs_ev_fops);
 	mhi_state_stats = debugfs_create_file("mhi_state_stats",
 					0444,
 					mhi_parent_folder,
@@ -97,6 +111,7 @@ static ssize_t mhi_dbgfs_chan_read(struct file *fp, char __user *buf,
 	if (NULL == mhi_dev_ctxt)
 		return -EIO;
 	*offp = (u32)(*offp) % MHI_MAX_CHANNELS;
+	if (*offp == (MHI_MAX_CHANNELS - 1)) usleep(2);
 	chan_ctxt = &mhi_dev_ctxt->mhi_ctrl_seg->mhi_cc_list[*offp];
 	amnt_copied =
 	scnprintf(chan_info,
@@ -120,6 +135,48 @@ static ssize_t mhi_dbgfs_chan_read(struct file *fp, char __user *buf,
 		mhi_dev_ctxt->mhi_local_chan_ctxt[*offp].rp);
 	*offp += 1;
 
+	if (amnt_copied < count)
+		return amnt_copied -
+			copy_to_user(buf, chan_info, amnt_copied);
+	else
+		return -ENOMEM;
+}
+static ssize_t mhi_dbgfs_ev_read(struct file *fp, char __user *buf,
+				size_t count, loff_t *offp)
+{
+	int amnt_copied = 0;
+	int event_ring_index = 0;
+	mhi_event_ctxt *ev_ctxt;
+	mhi_device_ctxt *mhi_dev_ctxt = mhi_devices.device_list[0].mhi_ctxt;
+	if (NULL == mhi_dev_ctxt)
+		return -EIO;
+	*offp = (u32)(*offp) % EVENT_RINGS_ALLOCATED;
+	event_ring_index = mhi_dev_ctxt->alloced_ev_rings[*offp];
+	ev_ctxt = &mhi_dev_ctxt->mhi_ctrl_seg->mhi_ec_list[event_ring_index];
+	if (*offp == (EVENT_RINGS_ALLOCATED - 1)) usleep(200000);
+	amnt_copied =
+	scnprintf(chan_info,
+		sizeof(chan_info),
+		"%s 0x%08x %s %02x %s 0x%08x %s 0x%08x %s 0x%llx %s %llx %s %p %s %p %s %p\n",
+		"Event Context ",
+		(unsigned int)event_ring_index,
+		"Intmod Value",
+		MHI_GET_EV_CTXT(EVENT_CTXT_INTMODT, ev_ctxt),
+		"MSI Vector",
+		ev_ctxt->mhi_msi_vector,
+		"MSI RX Count",
+		mhi_dev_ctxt->msi_counter[*offp],
+		"event_base phy:",
+		ev_ctxt->mhi_event_ring_base_addr,
+		"event_rp phy:",
+		ev_ctxt->mhi_event_read_ptr,
+		"event base virt:",
+		mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index].base,
+		"event wp virt:",
+		mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index].wp,
+		"event rp virt:",
+		mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index].rp);
+	*offp += 1;
 	if (amnt_copied < count)
 		return amnt_copied -
 			copy_to_user(buf, chan_info, amnt_copied);

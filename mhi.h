@@ -345,9 +345,9 @@ typedef struct mhi_client_handle {
 	u32 event_ring_index;
 	u32 msi_vec;
 	u32 cb_mod;
+	u32 intmod_t;
 	u32 pkt_count;
 } mhi_client_handle;
-
 typedef enum MHI_EVENT_POLLING {
 	MHI_EVENT_POLLING_DISABLED = 0x0,
 	MHI_EVENT_POLLING_ENABLED = 0x1,
@@ -423,6 +423,7 @@ struct mhi_device_ctxt {
 	atomic_t start_cmd_pending_ack;
 	u32 alloced_ev_rings[EVENT_RINGS_ALLOCATED];
 	u32 ev_ring_props[EVENT_RINGS_ALLOCATED];
+	u32 msi_counter[EVENT_RINGS_ALLOCATED];
 	u32 hw_intmod_rate;
 	u32 outbound_evmod_rate;
 	u32 m0_m1;

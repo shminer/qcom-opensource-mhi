@@ -63,7 +63,7 @@ extern MHI_DEBUG_CLASS mhi_msg_class;
 #define pcie_write(base, offset, val) writel_relaxed(val,\
 			(volatile void *)(uintptr_t)(base + offset))
 
-irq_handler_t irq_cb(int msi_number, void *dev_id);
+irqreturn_t irq_cb(int msi_number, void *dev_id);
 
 struct mhi_meminfo {
 	struct device *dev;
