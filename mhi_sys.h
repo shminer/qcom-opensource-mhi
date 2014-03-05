@@ -42,6 +42,7 @@
 #include <mach/msm_pcie.h>
 #include <linux/debugfs.h>
 #include <linux/uaccess.h>
+#include <linux/platform_device.h>
 
 extern MHI_DEBUG_LEVEL mhi_msg_lvl;
 extern MHI_DEBUG_CLASS mhi_msg_class;

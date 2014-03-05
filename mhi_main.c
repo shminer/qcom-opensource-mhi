@@ -80,26 +80,26 @@ mhi_pcie_read_ep_config_err:
 int mhi_init_gpios(mhi_pcie_dev_info *mhi_pcie_dev)
 {
 	int ret_val = 0;
-	mhi_log(MHI_MSG_VERBOSE | MHI_DBG_POWER,
+	mhi_log(MHI_MSG_VERBOSE,
 			"Attempting to grab DEVICE_WAKE gpio\n");
 
 	ret_val = gpio_request(MHI_DEVICE_WAKE_GPIO, "mhi");
 	if (ret_val) {
-		mhi_log(MHI_MSG_VERBOSE | MHI_DBG_POWER,
+		mhi_log(MHI_MSG_VERBOSE,
 			"Could not obtain device WAKE gpio\n");
 	}
-	mhi_log(MHI_MSG_VERBOSE | MHI_DBG_POWER,
+	mhi_log(MHI_MSG_VERBOSE,
 		"Attempting to set output direction to DEVICE_WAKE gpio\n");
 	/* This GPIO must never sleep as it can be set in timer ctxt */
 	gpio_set_value_cansleep(MHI_DEVICE_WAKE_GPIO, 0);
 	if (ret_val)
-		mhi_log(MHI_MSG_ERROR | MHI_DBG_POWER,
+		mhi_log(MHI_MSG_VERBOSE,
 		"Could not set GPIO to not sleep!\n");
 
 	ret_val = gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
 
 	if (ret_val) {
-		mhi_log(MHI_MSG_ERROR | MHI_DBG_POWER,
+		mhi_log(MHI_MSG_VERBOSE,
 			"Failed to set output direction of DEVICE_WAKE gpio\n");
 		goto mhi_gpio_dir_err;
 	}
@@ -275,6 +275,7 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	MHI_ASSERT(VALID_BUF(buf, buf_len));
 	mhi_dev_ctxt = client_handle->mhi_dev_ctxt;
 	chan = client_handle->chan;
+
 
 	/* Bump up the vote for pending data */
 	read_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
@@ -921,16 +922,16 @@ MHI_STATUS parse_outbound(mhi_device_ctxt *mhi_dev_ctxt, u32 chan,
 MHI_STATUS probe_clients(mhi_device_ctxt *mhi_dev_ctxt)
 {
 	int ret_val = 0;
-	ret_val = rmnet_mhi_probe(mhi_dev_ctxt->dev_info->pcie_device);
-	if (0 != ret_val)
-	{
-		mhi_log(MHI_MSG_CRITICAL, "MHI Rmnet Failed to probe.\n");
-		goto error;
-	}
-	ret_val = mhi_shim_probe(mhi_dev_ctxt->dev_info->pcie_device);
-	if (0 != ret_val)
-		mhi_log(MHI_MSG_CRITICAL, "MHI Shim Failed to probe.\n");
-error:
+	mhi_dev_ctxt->mhi_rmnet_dev = platform_device_alloc("mhi_rmnet",-1);
+	ret_val = platform_device_add(mhi_dev_ctxt->mhi_rmnet_dev);
+	if (ret_val)
+		mhi_log(MHI_MSG_CRITICAL, "Failed to add MHI_RmNET device.\n");
+
+	mhi_dev_ctxt->mhi_uci_dev = platform_device_alloc("mhi_uci",-1);
+	ret_val = platform_device_add(mhi_dev_ctxt->mhi_uci_dev);
+
+	if (ret_val)
+		mhi_log(MHI_MSG_CRITICAL, "Failed to add MHI_SHIM device.\n");
 	return ret_val;
 }
 
@@ -950,4 +951,16 @@ MHI_STATUS mhi_wait_for_link_stability(mhi_device_ctxt *mhi_dev_ctxt)
 		j++;
 	}
 	return MHI_STATUS_SUCCESS;
+}
+int mhi_get_max_buffers(mhi_client_handle *client_handle)
+{
+	if (IS_SOFTWARE_CHANNEL(client_handle->chan))
+		return MAX_NR_TRBS_PER_SOFT_CHAN - 1;
+	else
+		return MAX_NR_TRBS_PER_HARD_CHAN - 1;
+}
+
+int mhi_get_epid(mhi_client_handle *client_handle)
+{
+	return MHI_EPID;
 }
