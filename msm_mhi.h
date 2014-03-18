@@ -106,6 +106,7 @@ typedef struct mhi_client_info_t {
 	void (*mhi_xfer_cb)(mhi_result *);
 	void (*mhi_chan_reset_cb)(void *user_data);
 	u32 cb_mod;
+	u32 intmod_t;
 } mhi_client_info_t;
 
 MHI_STATUS mhi_open_channel(mhi_client_handle **client_handle,

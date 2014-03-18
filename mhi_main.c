@@ -15,6 +15,7 @@
 #include "mhi_macros.h"
 
 extern struct pci_driver mhi_pcie_driver;
+extern u32 mhi_performance_mode;
 
 int mhi_init_pcie_device(mhi_pcie_dev_info *mhi_pcie_dev)
 {
@@ -157,6 +158,20 @@ MHI_STATUS mhi_open_channel(mhi_client_handle **client_handle,
 		(*client_handle)->cb_mod = client_info->cb_mod;
 	else
 		(*client_handle)->cb_mod = 1;
+
+	if (chan == MHI_CLIENT_IP_HW_0_OUT) {
+		mhi_log(MHI_MSG_VERBOSE,
+			"Client opening chan 0x%x, Invalid intmod value 0x%x\n",
+			chan, client_info->intmod_t);
+		if (client_info->intmod_t == 0)
+			(*client_handle)->intmod_t = 2;
+		else
+			(*client_handle)->intmod_t =
+					client_info->intmod_t;
+		MHI_SET_EV_CTXT(EVENT_CTXT_INTMODT,
+			&mhi_ctrl_seg->mhi_ec_list[(*client_handle)->event_ring_index],
+			(*client_handle)->intmod_t);
+	}
 	mhi_log(MHI_MSG_VERBOSE,
 		"Successfuly started chan 0x%x\n", chan);
 
@@ -277,16 +292,20 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	chan = client_handle->chan;
 
 
-	/* Bump up the vote for pending data */
-	read_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
+	if (!mhi_performance_mode) {
+		/* Bump up the vote for pending data */
+		read_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
 
-	if (1 == atomic_add_return(1, &mhi_dev_ctxt->data_pending)) {
-		hrtimer_try_to_cancel(&mhi_dev_ctxt->inactivity_tmr);
-		mhi_dev_ctxt->m1_m0++;
+		if (1 == atomic_add_return(1, &mhi_dev_ctxt->data_pending)) {
+			hrtimer_try_to_cancel(&mhi_dev_ctxt->inactivity_tmr);
+			mhi_dev_ctxt->m1_m0++;
+		}
+		gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
+		read_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
+	} else {
+		gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
 	}
-	gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
 
-	read_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 
 	/* Add the TRB to the correct transfer ring */
 	ret_val = ctxt_add_element(&mhi_dev_ctxt->mhi_local_chan_ctxt[chan],
@@ -301,7 +320,11 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	get_element_index(&mhi_dev_ctxt->mhi_local_chan_ctxt[chan],
 				pkt_loc, &trb_index);
 
-	MHI_TRB_SET_INFO(TX_TRB_BEI, pkt_loc, 0);
+	if (0 != client_handle->intmod_t)
+		MHI_TRB_SET_INFO(TX_TRB_BEI, pkt_loc, 1);
+	else
+		MHI_TRB_SET_INFO(TX_TRB_BEI, pkt_loc, 0);
+
 	MHI_TRB_SET_INFO(TX_TRB_IEOT, pkt_loc, 1);
 	MHI_TRB_SET_INFO(TX_TRB_CHAIN, pkt_loc, chain);
 	MHI_TRB_SET_INFO(TX_TRB_IEOB, pkt_loc, eob);
@@ -323,10 +346,12 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	}
 	/* If there are no clients still sending we can trigger our
 	 * inactivity timer */
+	if (!mhi_performance_mode) {
 	if (0 == atomic_sub_return(1, &mhi_dev_ctxt->data_pending)) {
 		hrtimer_start(&mhi_dev_ctxt->inactivity_tmr,
 			mhi_dev_ctxt->inactivity_timeout,
 			HRTIMER_MODE_REL);
+		}
 	}
 	return MHI_STATUS_SUCCESS;
 error:
