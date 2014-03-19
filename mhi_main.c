@@ -582,7 +582,7 @@ MHI_STATUS parse_xfer_event(mhi_device_ctxt *ctxt, mhi_event_pkt *event)
 				parse_outbound(mhi_dev_ctxt, chan,
 						local_ev_trb_loc, xfer_len);
 			}
-			mhi_dev_ctxt->mhi_chan_cntr[chan].pkts_from_dev++;
+			mhi_dev_ctxt->mhi_chan_cntr[chan].pkts_xferd++;
 			if (local_trb_loc ==
 				(mhi_xfer_pkt *)local_chan_ctxt->rp) {
 				mhi_log(MHI_MSG_CRITICAL,
@@ -875,7 +875,7 @@ MHI_STATUS mhi_client_recycle_trb(mhi_client_handle *client_handle)
 	    MHI_STATE_M1 == mhi_dev_ctxt->mhi_state)
 		MHI_WRITE_DB(mhi_dev_ctxt->channel_db_addr, chan, db_value);
 	atomic_dec(&mhi_dev_ctxt->data_pending);
-	mhi_dev_ctxt->mhi_chan_cntr[chan].pkts_from_dev++;
+	mhi_dev_ctxt->mhi_chan_cntr[chan].pkts_xferd++;
 	mutex_unlock(chan_mutex);
 	return ret_val;
 }
@@ -1012,12 +1012,17 @@ MHI_STATUS mhi_wait_for_link_stability(mhi_device_ctxt *mhi_dev_ctxt)
 	}
 	return MHI_STATUS_SUCCESS;
 }
-int mhi_get_max_buffers(mhi_client_handle *client_handle)
+int mhi_get_chan_max_buffers(u32 chan)
 {
-	if (IS_SOFTWARE_CHANNEL(client_handle->chan))
+	if (IS_SOFTWARE_CHANNEL(chan))
 		return MAX_NR_TRBS_PER_SOFT_CHAN - 1;
 	else
 		return MAX_NR_TRBS_PER_HARD_CHAN - 1;
+}
+
+int mhi_get_max_buffers(mhi_client_handle *client_handle)
+{
+	return mhi_get_chan_max_buffers(client_handle->chan);
 }
 
 int mhi_get_epid(mhi_client_handle *client_handle)

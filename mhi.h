@@ -373,8 +373,7 @@ typedef struct mhi_control_seg {
 
 typedef struct mhi_counters {
 	u32 empty_ring_removal;
-	u32 pkts_to_dev;
-	u32 pkts_from_dev;
+	u32 pkts_xferd;
 	u32 ev_processed;
 } mhi_counters;
 
@@ -580,6 +579,7 @@ int mhi_init_pm_sysfs(struct device *dev);
 MHI_STATUS mhi_init_timers(mhi_device_ctxt *mhi_dev_ctxt);
 void mhi_remove(struct pci_dev *mhi_device);
 int mhi_startup_thread(void *ctxt);
+int mhi_get_chan_max_buffers(u32 chan);
 int rmnet_mhi_remove(struct pci_dev *dev);
 
 #endif
