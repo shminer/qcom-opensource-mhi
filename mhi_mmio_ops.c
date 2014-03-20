@@ -79,7 +79,7 @@ MHI_STATUS mhi_init_mmio(mhi_device_ctxt *mhi_dev_ctxt)
 					mhi_dev_ctxt->dev_props.mhi_ver);
 
 		if (0xFFFFffff == mhi_dev_ctxt->dev_props.mhi_ver)
-			ret_val = mhi_wait_for_link_stability(mhi_dev_ctxt);
+			ret_val = mhi_wait_for_mdm(mhi_dev_ctxt);
 		if (ret_val)
 			return MHI_STATUS_ERROR;
 	}

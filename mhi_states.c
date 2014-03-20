@@ -334,6 +334,8 @@ void ring_all_chan_dbs(mhi_device_ctxt *mhi_dev_ctxt)
 	u64 db_value;
 	u64 rp;
 	mhi_ring *local_ctxt;
+	struct mutex *cmd_mutex = NULL;
+	cmd_mutex = &mhi_dev_ctxt->mhi_cmd_mutex_list[PRIMARY_CMD_RING];
 	for (i = 0; i < MHI_MAX_CHANNELS; ++i)
 		if (VALID_CHAN_NR(i)) {
 			local_ctxt = &mhi_dev_ctxt->mhi_local_chan_ctxt[i];
@@ -344,20 +346,27 @@ void ring_all_chan_dbs(mhi_device_ctxt *mhi_dev_ctxt)
 			if (rp != db_value)
 				conditional_db_write(mhi_dev_ctxt, i);
 		}
+	/* Write the cmd ring */
+	mutex_lock(cmd_mutex);
+	db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
+				(uintptr_t)mhi_dev_ctxt->mhi_local_cmd_ctxt[0].wp);
+	if (0 == mhi_dev_ctxt->cmd_ring_order)
+		MHI_WRITE_DB(mhi_dev_ctxt->cmd_db_addr, 0, db_value);
+	mhi_dev_ctxt->cmd_ring_order = 0;
+	mutex_unlock(cmd_mutex);
 }
 void conditional_db_write(mhi_device_ctxt *mhi_dev_ctxt, u32 chan)
 {
 	u64 db_value;
-	atomic_set(&mhi_dev_ctxt->mhi_chan_db_order[chan], 0);
-	if (1 == atomic_add_return(1,
-			&mhi_dev_ctxt->mhi_chan_db_order[chan])) {
-		spin_lock(&mhi_dev_ctxt->db_write_lock[chan]);
+	spin_lock(&mhi_dev_ctxt->db_write_lock[chan]);
+	if (0 == &mhi_dev_ctxt->mhi_chan_db_order[chan]) {
 		db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 			(uintptr_t)mhi_dev_ctxt->mhi_local_chan_ctxt[chan].wp);
 		MHI_WRITE_DB(mhi_dev_ctxt->channel_db_addr,
 				chan, db_value);
-		spin_unlock(&mhi_dev_ctxt->db_write_lock[chan]);
 	}
+	mhi_dev_ctxt->mhi_chan_db_order[chan] = 0;
+	spin_unlock(&mhi_dev_ctxt->db_write_lock[chan]);
 }
 
 MHI_STATUS process_M1_transition(mhi_device_ctxt  *mhi_dev_ctxt,
