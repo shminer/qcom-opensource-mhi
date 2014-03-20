@@ -535,7 +535,7 @@ void uci_xfer_cb(mhi_result *result)
 			"Received cb on chan 0x%x, avail pkts: 0x%x\n",
 			chan_nr,
 			atomic_read(&uci_handle->avail_pkts));
-		wake_up(&uci_handle->read_wait_queue);
+		wake_up_interruptible(&uci_handle->read_wait_queue);
 	} else {
 		dma_unmap_single(NULL,
 				(dma_addr_t)(uintptr_t)result->payload_buf,

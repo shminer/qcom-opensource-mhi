@@ -372,6 +372,7 @@ typedef struct mhi_control_seg {
 } mhi_control_seg;
 
 typedef struct mhi_counters {
+	u32 empty_ring_removal;
 	u32 pkts_to_dev;
 	u32 pkts_from_dev;
 	u32 ev_processed;
@@ -565,8 +566,8 @@ MHI_STATUS process_SBL_transition(mhi_device_ctxt *mhi_dev_ctxt,
 MHI_STATUS mhi_wait_for_link_stability(mhi_device_ctxt *mhi_dev_ctxt);
 void conditional_db_write(mhi_device_ctxt *mhi_dev_ctxt, u32 chan);
 
-MHI_STATUS mhi_initiate_M3(mhi_device_ctxt *mhi_dev_ctxt);
-MHI_STATUS mhi_initiate_M0(mhi_device_ctxt *mhi_dev_ctxt);
+int mhi_initiate_M3(mhi_device_ctxt *mhi_dev_ctxt);
+int mhi_initiate_M0(mhi_device_ctxt *mhi_dev_ctxt);
 enum hrtimer_restart mhi_initiate_M1(struct hrtimer *timer);
 int mhi_suspend(struct pci_dev *dev, pm_message_t state);
 int mhi_resume(struct pci_dev *dev);

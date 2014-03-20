@@ -218,8 +218,8 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 		/* Sanity check, ensuring that this is actually the buffer */
 		if ((uintptr_t)dma_addr != (uintptr_t)result->payload_buf) {
 			/* TODO: Handle error */
-			pr_err("%s: Unexpected physical address mismatch",
-			       __func__);
+			pr_err("%s: Unexpected physical address mismatch, expected 0x%lx, got 0x%lx",
+			       __func__, (uintptr_t)dma_addr, (uintptr_t)result->payload_buf);
 			break;
 		}
 

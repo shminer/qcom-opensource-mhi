@@ -44,7 +44,7 @@ int mhi_suspend(struct pci_dev *pcie_dev, pm_message_t state)
 	if (NULL == mhi_dev_ctxt)
 		return 0;
 
-	if (MHI_STATUS_SUCCESS != mhi_initiate_M3(mhi_dev_ctxt))
+	if (0 != mhi_initiate_M3(mhi_dev_ctxt))
 		return -EIO;
 
 	ret_val = pci_save_state(pcie_dev);
@@ -100,10 +100,28 @@ int mhi_resume(struct pci_dev *pcie_dev)
 
 	mhi_initiate_M0(mhi_devices.device_list[0].mhi_ctxt);
 
-	/* We could go to M1 */
-	wait_event_interruptible(*mhi_dev_ctxt->M0_event,
-			mhi_dev_ctxt->mhi_state != MHI_STATE_M3);
-	return 0;
+	r = wait_event_interruptible_timeout(*mhi_devices.device_list[0].mhi_ctxt->M0_event,
+		mhi_devices.device_list[0].mhi_ctxt->mhi_state != MHI_STATE_M3,
+		msecs_to_jiffies(MHI_MAX_RESUME_TIMEOUT));
+	switch(r) {
+	case 0:
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+			"MDM failed to resume after 0x%x ms\n",
+			MHI_MAX_RESUME_TIMEOUT);
+		r = -ETIMEDOUT;
+		break;
+	case -ERESTARTSYS:
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+			"Going Down...\n");
+		r = -ENETRESET;
+		break;
+	default:
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+				"M0 event received\n");
+		r = 0;
+		break;
+	}
+	return r;
 }
 
 enum hrtimer_restart mhi_initiate_M1(struct hrtimer *timer)
@@ -132,7 +150,7 @@ enum hrtimer_restart mhi_initiate_M1(struct hrtimer *timer)
 	return HRTIMER_NORESTART;
 }
 
-MHI_STATUS mhi_initiate_M0(mhi_device_ctxt *mhi_dev_ctxt)
+int mhi_initiate_M0(mhi_device_ctxt *mhi_dev_ctxt)
 {
 	int ret_val = 0;
 	mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
@@ -148,10 +166,10 @@ MHI_STATUS mhi_initiate_M0(mhi_device_ctxt *mhi_dev_ctxt)
 			MHICTRL_MHISTATE_MASK,
 			MHICTRL_MHISTATE_SHIFT,
 			MHI_STATE_M0);
-	return MHI_STATUS_SUCCESS;
+	return 0;
 }
 
-MHI_STATUS mhi_initiate_M3(mhi_device_ctxt *mhi_dev_ctxt)
+int mhi_initiate_M3(mhi_device_ctxt *mhi_dev_ctxt)
 {
 	unsigned long flags = 0;
 	u32 i = 0;
@@ -191,15 +209,29 @@ MHI_STATUS mhi_initiate_M3(mhi_device_ctxt *mhi_dev_ctxt)
 			MHI_STATE_M3);
 	mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
 			"Waiting for M3 completion.\n");
-	wait_event_interruptible(*mhi_dev_ctxt->M3_event,
-			mhi_dev_ctxt->mhi_state == MHI_STATE_M3);
-	ret_val = gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 0);
-	if (ret_val)
-		mhi_log(MHI_MSG_ERROR | MHI_DBG_POWER,
-			"Could not set DEVICE WAKE GPIO LOW\n");
-	mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
+	ret_val = wait_event_interruptible_timeout(*mhi_dev_ctxt->M3_event,
+			mhi_dev_ctxt->mhi_state == MHI_STATE_M3,
+		msecs_to_jiffies(MHI_MAX_SUSPEND_TIMEOUT));
+	switch(ret_val) {
+	case 0:
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+			"MDM failed to suspend after %d ms\n",
+			MHI_MAX_SUSPEND_TIMEOUT);
+		ret_val = -ETIMEDOUT;
+		break;
+	case -ERESTARTSYS:
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+			"Going Down...\n");
+		ret_val = -ENETRESET;
+		break;
+	default:
+		mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
 			"M3 completion received\n");
-	return MHI_STATUS_SUCCESS;
+		ret_val = 0;
+		break;
+	}
+	gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 0);
+	return ret_val;
 }
 
 int mhi_init_pm_sysfs(struct device *dev)
@@ -215,7 +247,7 @@ ssize_t sysfs_init_M3(struct device *dev, struct device_attribute *attr,
 	if (r) {
 		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
 				"Failed to suspend %d\n", r);
-		return -EIO;
+		return r;
 	}
 	r = pci_save_state(
 		mhi_devices.device_list[0].mhi_ctxt->dev_info->pcie_device);
@@ -280,10 +312,24 @@ ssize_t sysfs_init_M0(struct device *dev, struct device_attribute *attr,
 	mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
 			"Current mhi_state = 0x%x\n",
 			mhi_devices.device_list[0].mhi_ctxt->mhi_state);
-	wait_event_interruptible(*mhi_devices.device_list[0].mhi_ctxt->M0_event,
-		mhi_devices.device_list[0].mhi_ctxt->mhi_state != MHI_STATE_M3);
-	mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
-			"M0 event received\n");
+	r = wait_event_interruptible_timeout(*mhi_devices.device_list[0].mhi_ctxt->M0_event,
+		mhi_devices.device_list[0].mhi_ctxt->mhi_state != MHI_STATE_M3,
+		msecs_to_jiffies(MHI_MAX_RESUME_TIMEOUT));
+	switch(r) {
+	case 0:
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+			"MDM failed to resume after 0x%x ms\n",
+			MHI_MAX_RESUME_TIMEOUT);
+		break;
+	case -ERESTARTSYS:
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+			"Going Down...\n");
+		break;
+	default:
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+				"M0 event received\n");
+		break;
+	}
 	return count;
 }
 
