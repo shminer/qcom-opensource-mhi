@@ -546,8 +546,7 @@ MHI_STATUS mhi_init_contexts(mhi_device_ctxt *mhi_device)
 		MHI_GET_EVENT_RING_INFO(EVENT_RING_MSI_VEC,
 					mhi_device->ev_ring_props[i],
 					msi_vec);
-		intmod_t = (SECONDARY_EVENT_RING == i ||
-				i == TERTIARY_EVENT_RING) ? 3 : 0;
+		intmod_t = (SECONDARY_EVENT_RING == i) ? 3 : 0;
 		event_ring_index = mhi_device->alloced_ev_rings[i];
 		event_ctxt = &mhi_ctrl->mhi_ec_list[event_ring_index];
 		local_event_ctxt =
@@ -572,7 +571,7 @@ MHI_STATUS mhi_init_contexts(mhi_device_ctxt *mhi_device)
 			CMD_EL_PER_RING,
 			&mhi_device->mhi_local_cmd_ctxt[PRIMARY_CMD_RING]);
 
-	mhi_log(MHI_MSG_INFO, "Initializeing contexts\n");
+	mhi_log(MHI_MSG_INFO, "Initializing contexts\n");
 	/* Initialize Channel Contexts */
 	for (i = 0; i < MHI_MAX_CHANNELS; ++i) {
 		trb_list = mhi_device->mhi_ctrl_seg->xfer_trb_list[i];

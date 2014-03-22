@@ -408,7 +408,7 @@ struct mhi_device_ctxt {
 	u32 pending_M3;
 	u32 mhi_chan_db_order[MHI_MAX_CHANNELS];
 	spinlock_t *db_write_lock;
-
+	u32 mhi_ev_db_order[EVENT_RINGS_ALLOCATED];
 	MHI_THREAD_STATE event_thread_state;
 	MHI_THREAD_STATE state_change_thread_state;
 	struct platform_device *mhi_uci_dev;
@@ -564,8 +564,8 @@ MHI_STATUS process_AMSS_transition(mhi_device_ctxt *mhi_dev_ctxt,
 MHI_STATUS process_SBL_transition(mhi_device_ctxt *mhi_dev_ctxt,
 				mhi_state_work_item *cur_work_item);
 MHI_STATUS mhi_wait_for_mdm(mhi_device_ctxt *mhi_dev_ctxt);
-void conditional_db_write(mhi_device_ctxt *mhi_dev_ctxt, u32 chan);
-
+void conditional_chan_db_write(mhi_device_ctxt *mhi_dev_ctxt, u32 chan);
+void ring_all_ev_dbs(mhi_device_ctxt *mhi_dev_ctxt);
 int mhi_initiate_M3(mhi_device_ctxt *mhi_dev_ctxt);
 int mhi_initiate_M0(mhi_device_ctxt *mhi_dev_ctxt);
 enum hrtimer_restart mhi_initiate_M1(struct hrtimer *timer);
@@ -582,5 +582,6 @@ void mhi_remove(struct pci_dev *mhi_device);
 int mhi_startup_thread(void *ctxt);
 int mhi_get_chan_max_buffers(u32 chan);
 int rmnet_mhi_remove(struct pci_dev *dev);
+void ring_all_cmd_dbs(mhi_device_ctxt *mhi_dev_ctxt);
 
 #endif

@@ -203,6 +203,8 @@ void mhi_mask_irq(mhi_client_handle *client_handle)
 		client_handle->msi_vec);
 	if (client_handle == NULL)
 		return;
+	disable_irq_nosync(MSI_TO_IRQ(client_handle->mhi_dev_ctxt,
+					client_handle->msi_vec));
 }
 void mhi_unmask_irq(mhi_client_handle *client_handle)
 {
@@ -210,4 +212,6 @@ void mhi_unmask_irq(mhi_client_handle *client_handle)
 			client_handle->msi_vec);
 	if  (client_handle == NULL)
 		return;
+	enable_irq(MSI_TO_IRQ(client_handle->mhi_dev_ctxt,
+			client_handle->msi_vec));
 }
