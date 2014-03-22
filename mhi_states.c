@@ -284,6 +284,7 @@ MHI_STATUS process_M0_transition(mhi_device_ctxt *mhi_dev_ctxt,
 	u32 device_state_change = 0;
 	u32 pcie_word_val = 0;
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
+	unsigned long flags;
 	mhi_log(MHI_MSG_INFO, "Processing M0 state transition\n");
 
 	/* Wait for mhi_dev_ctxt transition to M0 */
@@ -315,11 +316,18 @@ MHI_STATUS process_M0_transition(mhi_device_ctxt *mhi_dev_ctxt,
 		else if (mhi_dev_ctxt->mhi_state == MHI_STATE_M3)
 			mhi_dev_ctxt->m3_m0++;
 		mhi_dev_ctxt->mhi_state = MHI_STATE_M0;
-		if (mhi_dev_ctxt->mhi_initialized) {
-			atomic_inc(&mhi_dev_ctxt->data_pending);
-			ring_all_chan_dbs(mhi_dev_ctxt);
-			atomic_dec(&mhi_dev_ctxt->data_pending);
-		}
+	}
+	if (mhi_dev_ctxt->mhi_initialized) {
+		/* Bump up the vote for pending data */
+		read_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
+		atomic_inc(&mhi_dev_ctxt->data_pending);
+		gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
+		read_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
+
+		ring_all_ev_dbs(mhi_dev_ctxt);
+		ring_all_chan_dbs(mhi_dev_ctxt);
+		ring_all_cmd_dbs(mhi_dev_ctxt);
+		atomic_dec(&mhi_dev_ctxt->data_pending);
 	}
 	if (mhi_dev_ctxt->mhi_initialized &&
 	    mhi_dev_ctxt->pending_M3 == 0)
@@ -328,14 +336,40 @@ MHI_STATUS process_M0_transition(mhi_device_ctxt *mhi_dev_ctxt,
 	return MHI_STATUS_SUCCESS;
 }
 
+void ring_all_ev_dbs(mhi_device_ctxt *mhi_dev_ctxt)
+{
+	u32 i;
+	u64 db_value = 0;
+	u32 event_ring_index;
+	mhi_event_ctxt *event_ctxt = NULL;
+	mhi_control_seg *mhi_ctrl = NULL;
+	spinlock_t *lock = NULL;
+	mhi_ctrl = mhi_dev_ctxt->mhi_ctrl_seg;
+
+	for (i = 0; i < EVENT_RINGS_ALLOCATED; ++i) {
+		event_ring_index = mhi_dev_ctxt->alloced_ev_rings[i];
+		lock = &mhi_dev_ctxt->mhi_ev_spinlock_list[event_ring_index];
+		mhi_dev_ctxt->mhi_ev_db_order[event_ring_index] = 0;
+		spin_lock(lock);
+		event_ctxt = &mhi_ctrl->mhi_ec_list[event_ring_index];
+		db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
+			(uintptr_t)mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index].wp);
+
+		if (0 == mhi_dev_ctxt->mhi_ev_db_order[event_ring_index]) {
+			MHI_WRITE_DB(mhi_dev_ctxt->event_db_addr,
+				event_ring_index, db_value);
+		}
+		mhi_dev_ctxt->mhi_ev_db_order[event_ring_index] = 0;
+		spin_unlock(lock);
+	}
+}
 void ring_all_chan_dbs(mhi_device_ctxt *mhi_dev_ctxt)
 {
 	u32 i = 0;
-	u64 db_value;
-	u64 rp;
-	mhi_ring *local_ctxt;
-	struct mutex *cmd_mutex = NULL;
-	cmd_mutex = &mhi_dev_ctxt->mhi_cmd_mutex_list[PRIMARY_CMD_RING];
+	u64 db_value = 0;
+	u64 rp = 0;
+	mhi_ring *local_ctxt = NULL;
+	mhi_log(MHI_MSG_VERBOSE, "Ringing chan dbs\n");
 	for (i = 0; i < MHI_MAX_CHANNELS; ++i)
 		if (VALID_CHAN_NR(i)) {
 			local_ctxt = &mhi_dev_ctxt->mhi_local_chan_ctxt[i];
@@ -344,24 +378,34 @@ void ring_all_chan_dbs(mhi_device_ctxt *mhi_dev_ctxt)
 			db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 				(uintptr_t)local_ctxt->wp);
 			if ((rp != db_value) && (i % 2 == 0))
-				conditional_db_write(mhi_dev_ctxt, i);
+				conditional_chan_db_write(mhi_dev_ctxt, i);
 			else
-				conditional_db_write(mhi_dev_ctxt, i);
+				conditional_chan_db_write(mhi_dev_ctxt, i);
 		}
+}
+
+void ring_all_cmd_dbs(mhi_device_ctxt *mhi_dev_ctxt)
+{
+	struct mutex *cmd_mutex = NULL;
+	u64 db_value;
+	mhi_log(MHI_MSG_VERBOSE, "Ringing chan dbs\n");
+	cmd_mutex = &mhi_dev_ctxt->mhi_cmd_mutex_list[PRIMARY_CMD_RING];
 	/* Write the cmd ring */
+	mhi_dev_ctxt->cmd_ring_order = 0;
 	mutex_lock(cmd_mutex);
 	db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
-				(uintptr_t)mhi_dev_ctxt->mhi_local_cmd_ctxt[0].wp);
+			(uintptr_t)mhi_dev_ctxt->mhi_local_cmd_ctxt[0].wp);
 	if (0 == mhi_dev_ctxt->cmd_ring_order)
 		MHI_WRITE_DB(mhi_dev_ctxt->cmd_db_addr, 0, db_value);
 	mhi_dev_ctxt->cmd_ring_order = 0;
 	mutex_unlock(cmd_mutex);
 }
-void conditional_db_write(mhi_device_ctxt *mhi_dev_ctxt, u32 chan)
+void conditional_chan_db_write(mhi_device_ctxt *mhi_dev_ctxt, u32 chan)
 {
 	u64 db_value;
+	mhi_dev_ctxt->mhi_chan_db_order[chan] = 0;
 	spin_lock(&mhi_dev_ctxt->db_write_lock[chan]);
-	if (0 == &mhi_dev_ctxt->mhi_chan_db_order[chan]) {
+	if (0 == mhi_dev_ctxt->mhi_chan_db_order[chan]) {
 		db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 			(uintptr_t)mhi_dev_ctxt->mhi_local_chan_ctxt[chan].wp);
 		MHI_WRITE_DB(mhi_dev_ctxt->channel_db_addr,

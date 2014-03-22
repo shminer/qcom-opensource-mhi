@@ -159,7 +159,7 @@ MHI_STATUS mhi_open_channel(mhi_client_handle **client_handle,
 	else
 		(*client_handle)->cb_mod = 1;
 
-	if (IS_HARDWARE_CHANNEL(chan))
+	if (MHI_CLIENT_IP_HW_0_OUT == chan)
 		(*client_handle)->intmod_t = 3;
 	mhi_log(MHI_MSG_VERBOSE,
 		"Successfuly started chan 0x%x\n", chan);
@@ -627,17 +627,35 @@ MHI_STATUS recycle_trb_and_ring(mhi_device_ctxt *mhi_dev_ctxt,
 	    MHI_STATE_M1 == mhi_dev_ctxt->mhi_state) {
 		switch (ring_type) {
 		case MHI_RING_TYPE_CMD_RING:
+		{
+			struct mutex *cmd_mutex = NULL;
+			cmd_mutex =
+				&mhi_dev_ctxt->mhi_cmd_mutex_list[PRIMARY_CMD_RING];
+			mutex_lock(cmd_mutex);
+			mhi_dev_ctxt->cmd_ring_order = 1;
 			MHI_WRITE_DB(mhi_dev_ctxt->cmd_db_addr,
 					ring_index, db_value);
+			mutex_unlock(cmd_mutex);
 			break;
+		}
 		case MHI_RING_TYPE_EVENT_RING:
-			MHI_WRITE_DB(mhi_dev_ctxt->event_db_addr,
-					ring_index, db_value);
+		{
+			spinlock_t *lock = NULL;
+			lock = &mhi_dev_ctxt->mhi_ev_spinlock_list[ring_index];
+			spin_lock(lock);
+			mhi_dev_ctxt->mhi_ev_db_order[ring_index] = 1;
+				MHI_WRITE_DB(mhi_dev_ctxt->event_db_addr,
+						ring_index, db_value);
+			spin_unlock(lock);
 			break;
+		}
 		case MHI_RING_TYPE_XFER_RING:
 		{
+			spin_lock(&mhi_dev_ctxt->db_write_lock[ring_index]);
+			mhi_dev_ctxt->mhi_chan_db_order[ring_index] = 1;
 			MHI_WRITE_DB(mhi_dev_ctxt->channel_db_addr,
 					ring_index, db_value);
+			spin_unlock(&mhi_dev_ctxt->db_write_lock[ring_index]);
 			break;
 		}
 		default:
