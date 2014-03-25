@@ -147,7 +147,7 @@ enum hrtimer_restart mhi_initiate_M1(struct hrtimer *timer)
 				"Could not set DEVICE WAKE GPIO LOW\n");
 	}
 	write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
-	return HRTIMER_NORESTART;
+	return HRTIMER_RESTART;
 }
 
 int mhi_initiate_M0(mhi_device_ctxt *mhi_dev_ctxt)
