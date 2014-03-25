@@ -193,8 +193,8 @@
 	((((_PKT)->type).info >> MHI_##_FIELD ## __SHIFT) & \
 	 MHI_##_FIELD ## __MASK)
 
-#define HIGH_WORD(_x) ((u32)((_x) >> 32) & 0xFFFFFFFF)
-#define LOW_WORD(_x) ((u32)(_x) & 0xFFFFFFFF)
+#define HIGH_WORD(_x) ((u32)((((u64)(_x)) >> 32) & 0xFFFFFFFF))
+#define LOW_WORD(_x) ((u32)(((u64)(_x)) & 0xFFFFFFFF))
 
 #define MHI_REG_WRITE(_base, _offset, _val) \
 	do { \
