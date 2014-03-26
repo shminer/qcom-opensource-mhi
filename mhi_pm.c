@@ -140,7 +140,7 @@ enum hrtimer_restart mhi_initiate_M1(struct hrtimer *timer)
 			 MHI_STATE_M1 == mhi_dev_ctxt->mhi_state) &&
 			0 == mhi_dev_ctxt->pending_M3) {
 		mhi_dev_ctxt->mhi_state = MHI_STATE_M1;
-		ret_val = gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 0);
+		ret_val = gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
 		mhi_dev_ctxt->m0_m1++;
 		if (ret_val)
 			mhi_log(MHI_MSG_ERROR | MHI_DBG_POWER,
