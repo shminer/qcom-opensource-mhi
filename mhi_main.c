@@ -188,11 +188,6 @@ void mhi_close_channel(mhi_client_handle *mhi_handle)
 	chan = mhi_handle->chan;
 	mhi_log(MHI_MSG_INFO, "Client attempting to close chan 0x%x\n", chan);
 	index = mhi_handle->device_index;
-	/*
-	mhi_send_cmd(mhi_handle->mhi_dev_ctxt,
-			MHI_COMMAND_RESET_CHAN,
-			chan);
-	wait_for_completion_interruptible(&mhi_handle->chan_close_complete);*/
 	mhi_log(MHI_MSG_INFO, "Chan 0x%x confirmed closed.\n", chan);
 	mhi_handle->mhi_dev_ctxt->client_handle_list[mhi_handle->chan] = NULL;
 	atomic_dec(&(mhi_devices.device_list[index].ref_count));
@@ -333,8 +328,8 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 
 	if (MHI_STATE_M0 == mhi_dev_ctxt->mhi_state ||
 		MHI_STATE_M1 == mhi_dev_ctxt->mhi_state) {
-		atomic_inc(&mhi_dev_ctxt->mhi_chan_db_order[chan]);
 		spin_lock(&mhi_dev_ctxt->db_write_lock[chan]);
+		mhi_dev_ctxt->mhi_chan_db_order[chan]++;
 		db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 			(uintptr_t)mhi_dev_ctxt->mhi_local_chan_ctxt[chan].wp);
 		MHI_WRITE_DB(mhi_dev_ctxt->channel_db_addr, chan, db_value);
@@ -462,9 +457,13 @@ MHI_STATUS mhi_send_cmd(mhi_device_ctxt *mhi_dev_ctxt,
 	}
 	db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 			(uintptr_t)mhi_dev_ctxt->mhi_local_cmd_ctxt->wp);
-
 	mhi_dev_ctxt->mhi_chan_pend_cmd_ack[chan] = MHI_CMD_PENDING;
-	MHI_WRITE_DB(mhi_dev_ctxt->cmd_db_addr, 0, db_value);
+
+	if (MHI_STATE_M0 == mhi_dev_ctxt->mhi_state ||
+		MHI_STATE_M1 == mhi_dev_ctxt->mhi_state) {
+		mhi_dev_ctxt->cmd_ring_order++;
+		MHI_WRITE_DB(mhi_dev_ctxt->cmd_db_addr, 0, db_value);
+	}
 	mhi_log(MHI_MSG_VERBOSE, "Sent command 0x%x for chan 0x%x\n", cmd, chan);
 	mutex_unlock(&mhi_dev_ctxt->mhi_cmd_mutex_list[PRIMARY_CMD_RING]);
 
@@ -915,6 +914,7 @@ MHI_STATUS parse_inbound(mhi_device_ctxt *mhi_dev_ctxt, u32 chan,
 	if (mhi_dev_ctxt->mhi_local_chan_ctxt[chan].rp ==
 	    mhi_dev_ctxt->mhi_local_chan_ctxt[chan].wp) {
 		mhi_dev_ctxt->mhi_chan_cntr[chan].empty_ring_removal++;
+		mhi_wait_for_mdm(mhi_dev_ctxt);
 		return mhi_send_cmd(mhi_dev_ctxt,
 				    MHI_COMMAND_RESET_CHAN,
 				    chan);
@@ -963,6 +963,7 @@ MHI_STATUS parse_outbound(mhi_device_ctxt *mhi_dev_ctxt, u32 chan,
 	if (mhi_dev_ctxt->mhi_local_chan_ctxt[chan].rp ==
 	    mhi_dev_ctxt->mhi_local_chan_ctxt[chan].wp) {
 		mhi_dev_ctxt->mhi_chan_cntr[chan].empty_ring_removal++;
+		mhi_wait_for_mdm(mhi_dev_ctxt);
 		return mhi_send_cmd(mhi_dev_ctxt,
 					MHI_COMMAND_RESET_CHAN,
 					chan);
@@ -995,12 +996,12 @@ MHI_STATUS probe_clients(mhi_device_ctxt *mhi_dev_ctxt)
 	return ret_val;
 }
 
-MHI_STATUS mhi_wait_for_link_stability(mhi_device_ctxt *mhi_dev_ctxt)
+MHI_STATUS mhi_wait_for_mdm(mhi_device_ctxt *mhi_dev_ctxt)
 {
 	u32 j = 0;
 	while (0xFFFFffff == pcie_read(mhi_dev_ctxt->mmio_addr, MHIREGLEN)
 			&& j <= MHI_MAX_LINK_RETRIES) {
-		mhi_log(MHI_MSG_ERROR,
+		mhi_log(MHI_MSG_CRITICAL,
 				"Could not access MDM retry %d\n", j);
 		msleep(MHI_LINK_STABILITY_WAIT_MS);
 		if (MHI_MAX_LINK_RETRIES == j) {
