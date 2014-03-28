@@ -104,7 +104,9 @@ static ssize_t mhi_dbgfs_state_read(struct file *fp, char __user *buf,
 	amnt_copied =
 	scnprintf(chan_info,
 			sizeof(chan_info),
-			"%s %d %s %d %s %d %s %d %s %d %s %d\n",
+			"%s %u %s %d %s %d %s %d %s %d %s %d %s %d %s %d %s %d\n",
+			"Our State:",
+			mhi_dev_ctxt->mhi_state,
 			"M0->M1:",
 			mhi_dev_ctxt->m0_m1,
 			"M0<-M1:",
@@ -116,7 +118,11 @@ static ssize_t mhi_dbgfs_state_read(struct file *fp, char __user *buf,
 			"M0->M3:",
 			mhi_dev_ctxt->m0_m3,
 			"M0<-M3:",
-			mhi_dev_ctxt->m3_m0);
+			mhi_dev_ctxt->m3_m0,
+			"M3 Event Timeouts:",
+			mhi_dev_ctxt->m3_event_timeouts,
+			"M0 Event Timeouts:",
+			mhi_dev_ctxt->m0_event_timeouts);
 	if (amnt_copied < count)
 		return amnt_copied - copy_to_user(buf, chan_info, amnt_copied);
 	else
@@ -134,7 +140,7 @@ static ssize_t mhi_dbgfs_chan_read(struct file *fp, char __user *buf,
 	if (NULL == mhi_dev_ctxt)
 		return -EIO;
 	*offp = (u32)(*offp) % MHI_MAX_CHANNELS;
-	if (*offp == (MHI_MAX_CHANNELS - 1)) msleep(100);
+	if (*offp == (MHI_MAX_CHANNELS - 1)) msleep(1000);
 	while (!VALID_CHAN_NR(*offp)) {
 		*offp += 1;
 		*offp = (u32)(*offp) % MHI_MAX_CHANNELS;

@@ -9,8 +9,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License for more details.
  */
-#include "mhi.h"
+
 #include "mhi_sys.h"
+#include "mhi.h"
 
 inline MHI_STATUS ctxt_add_element(mhi_ring *ring, void **assigned_addr)
 {
