@@ -15,7 +15,6 @@
 #include "mhi_macros.h"
 
 extern struct pci_driver mhi_pcie_driver;
-extern u32 mhi_performance_mode;
 
 int mhi_init_pcie_device(mhi_pcie_dev_info *mhi_pcie_dev)
 {
@@ -159,7 +158,7 @@ MHI_STATUS mhi_open_channel(mhi_client_handle **client_handle,
 	else
 		(*client_handle)->cb_mod = 1;
 
-	if (MHI_CLIENT_IP_HW_0_OUT == chan)
+	if (MHI_CLIENT_IP_HW_0_OUT  == chan)
 		(*client_handle)->intmod_t = 3;
 	mhi_log(MHI_MSG_VERBOSE,
 		"Successfuly started chan 0x%x\n", chan);
@@ -191,7 +190,7 @@ void mhi_close_channel(mhi_client_handle *mhi_handle)
  * @return MHI_STATUS
  */
 MHI_STATUS mhi_add_elements_to_event_rings(mhi_device_ctxt *mhi_dev_ctxt,
-					MHI_STATE_TRANSITION new_state)
+					STATE_TRANSITION new_state)
 {
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
 	switch (new_state) {
@@ -623,6 +622,7 @@ MHI_STATUS recycle_trb_and_ring(mhi_device_ctxt *mhi_dev_ctxt,
 				*(mhi_tx_pkt *)removed_xfer_pkt;
 	}
 	atomic_inc(&mhi_dev_ctxt->data_pending);
+	/* Asserting Device Wake here, will imediately wake mdm */
 	if (MHI_STATE_M0 == mhi_dev_ctxt->mhi_state ||
 	    MHI_STATE_M1 == mhi_dev_ctxt->mhi_state) {
 		switch (ring_type) {
@@ -844,6 +844,7 @@ void mhi_poll_inbound(mhi_client_handle *client_handle,
 
 MHI_STATUS mhi_client_recycle_trb(mhi_client_handle *client_handle)
 {
+	unsigned long flags;
 	u32 chan = client_handle->chan;
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
 	mhi_device_ctxt *mhi_dev_ctxt = client_handle->mhi_dev_ctxt;
@@ -864,7 +865,10 @@ MHI_STATUS mhi_client_recycle_trb(mhi_client_handle *client_handle)
 	ret_val = ctxt_add_element(local_ctxt, NULL);
 	db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 					(uintptr_t)local_ctxt->wp);
+	read_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
 	atomic_inc(&mhi_dev_ctxt->data_pending);
+	gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
+	read_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 	if (MHI_STATE_M0 == mhi_dev_ctxt->mhi_state ||
 	    MHI_STATE_M1 == mhi_dev_ctxt->mhi_state)
 		MHI_WRITE_DB(mhi_dev_ctxt->channel_db_addr, chan, db_value);

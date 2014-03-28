@@ -64,51 +64,54 @@ MHI_STATUS mhi_reset(mhi_device_ctxt *mhi_dev_ctxt)
 
 int mhi_state_change_thread(void *ctxt)
 {
+	int r = 0;
 	mhi_device_ctxt *mhi_dev_ctxt = (mhi_device_ctxt *)ctxt;
-	mhi_state_work_item cur_work_item;
+	STATE_TRANSITION cur_work_item;
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
-	u32 empty_ring = 0;
 	mhi_state_work_queue *work_q =
 			&mhi_dev_ctxt->state_change_work_item_list;
-
-	mhi_ring *state_change_q = &work_q->q_info;
+	volatile mhi_ring *state_change_q = &work_q->q_info;
 
 	if (NULL == mhi_dev_ctxt) {
 		mhi_log(MHI_MSG_ERROR, "Got bad context, quitting\n");
 		return -EIO;
 	}
-	for (;;)	{
-		wait_event_interruptible(
+	for (;;) {
+		r = wait_event_interruptible(
 				*mhi_dev_ctxt->state_change_event_handle,
-				state_change_q->rp != state_change_q->wp ||
+				work_q->q_info.rp != work_q->q_info.wp ||
 				mhi_dev_ctxt->kill_threads);
-		do {
-			if (mhi_dev_ctxt->kill_threads) {
-				mhi_log(MHI_MSG_INFO,
-					"Caught exit signal, quitting\n");
-				mhi_dev_ctxt->state_change_thread_state =
-							MHI_THREAD_STATE_EXIT;
-				return 0;
-			}
-			mutex_lock(work_q->q_mutex);
-			if (work_q->q_info.rp == work_q->q_info.wp) {
-				mutex_unlock(work_q->q_mutex);
-				empty_ring = 1;
-			} else {
-				empty_ring = 0;
-				cur_work_item =
-				   *(mhi_state_work_item *)(state_change_q->rp);
-				ret_val = ctxt_del_element(
-				&work_q->q_info,
-					NULL);
-				mutex_unlock(work_q->q_mutex);
-				ret_val =
-					process_stt_work_item(mhi_dev_ctxt,
-								&cur_work_item);
+		switch(r) {
+		case -ERESTARTSYS:
+			return 0;
+			break;
+		default:
+			MHI_ASSERT(work_q->q_info.rp != work_q->q_info.wp);
+			break;
+		}
+
+		if (mhi_dev_ctxt->kill_threads) {
+			mhi_log(MHI_MSG_INFO,
+				"Caught exit signal, quitting\n");
+			mhi_dev_ctxt->state_change_thread_state =
+						MHI_THREAD_STATE_EXIT;
+			return 0;
+		}
+		mutex_lock(work_q->q_mutex);
+		cur_work_item = *(STATE_TRANSITION *)(state_change_q->rp);
+		*(STATE_TRANSITION *)(state_change_q->rp) = 0xDEADBEEF;
+		mhi_log(MHI_MSG_VERBOSE,
+		"AFTER ADD RP: 0x%lx WP:0x%lx STT: 0x%x, element_val 0x%x base 0x%lx\n",
+				(uintptr_t)work_q->q_info.rp,
+				(uintptr_t)work_q->q_info.wp,
+				cur_work_item,
+				*(STATE_TRANSITION *)(state_change_q->rp),
+				(uintptr_t)work_q->q_info.base);
+		ret_val = ctxt_del_element(&work_q->q_info, NULL);
+		MHI_ASSERT(ret_val == MHI_STATUS_SUCCESS);
+		mutex_unlock(work_q->q_mutex);
+		ret_val = process_stt_work_item(mhi_dev_ctxt, cur_work_item);
 				MHI_ASSERT(ret_val == MHI_STATUS_SUCCESS);
-			}
-		} while (!empty_ring);
-		empty_ring = 0;
 	}
 	return 0;
 }
@@ -182,14 +185,17 @@ MHI_STATUS mhi_reset_channel(mhi_client_handle *client_handle)
  * @return MHI_STATUS
  */
 MHI_STATUS mhi_init_state_transition(mhi_device_ctxt *mhi_dev_ctxt,
-		MHI_STATE_TRANSITION new_state)
+		STATE_TRANSITION new_state)
 {
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
-	mhi_state_work_item *cur_work_item = NULL;
+	volatile STATE_TRANSITION *cur_work_item = NULL;
 	s32 nr_avail_work_items = 0;
 	mhi_ring *stt_ring =
 		&mhi_dev_ctxt->state_change_work_item_list.q_info;
+	mhi_state_work_queue *work_q =
+			&mhi_dev_ctxt->state_change_work_item_list;
 
+	mutex_lock(work_q->q_mutex);
 	nr_avail_work_items = get_nr_avail_ring_elements(stt_ring);
 
 	if (0 >= nr_avail_work_items) {
@@ -199,11 +205,18 @@ MHI_STATUS mhi_init_state_transition(mhi_device_ctxt *mhi_dev_ctxt,
 	mhi_log(MHI_MSG_VERBOSE,
 		"Processing state transition %x\n",
 		new_state);
-	cur_work_item = stt_ring->wp;
-	cur_work_item->new_state = new_state;
+	*(STATE_TRANSITION *)stt_ring->wp = new_state;
 	ret_val = ctxt_add_element(stt_ring, (void **)&cur_work_item);
 	wmb();
+	mhi_log(MHI_MSG_VERBOSE ,
+	"AFTER ADD RP: 0x%lx WP:0x%lx STT: 0x%x, element_val 0x%x base 0x%lx\n",
+		(uintptr_t)work_q->q_info.rp,
+		(uintptr_t)work_q->q_info.wp,
+		new_state,
+		*(STATE_TRANSITION *)stt_ring->wp,
+		(uintptr_t)work_q->q_info.base);
 	MHI_ASSERT(MHI_STATUS_SUCCESS == ret_val);
+	mutex_unlock(work_q->q_mutex);
 	wake_up_interruptible(mhi_dev_ctxt->state_change_event_handle);
 	return ret_val;
 }
@@ -234,13 +247,13 @@ MHI_STATUS mhi_set_state_of_all_channels(mhi_device_ctxt *mhi_dev_ctxt,
 }
 
 MHI_STATUS process_stt_work_item(mhi_device_ctxt  *mhi_dev_ctxt,
-			mhi_state_work_item *cur_work_item)
+			STATE_TRANSITION cur_work_item)
 {
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
 
 	mhi_log(MHI_MSG_INFO, "Transitioning to %d\n",
-				(int)cur_work_item->new_state);
-	switch (cur_work_item->new_state) {
+				(int)cur_work_item);
+	switch (cur_work_item) {
 	case STATE_TRANSITION_BHI:
 		ret_val = process_BHI_transition(mhi_dev_ctxt, cur_work_item);
 		break;
@@ -271,52 +284,25 @@ MHI_STATUS process_stt_work_item(mhi_device_ctxt  *mhi_dev_ctxt,
 		break;
 	default:
 		mhi_log(MHI_MSG_ERROR,
-				"Unrecongized state change work item :%d\n",
-				cur_work_item->new_state);
+				"Unrecongized state: %d\n", cur_work_item);
+		MHI_ASSERT(0);
 		break;
 	}
 	return ret_val;
 }
 MHI_STATUS process_M0_transition(mhi_device_ctxt *mhi_dev_ctxt,
-			mhi_state_work_item *cur_work_item)
+			STATE_TRANSITION cur_work_item)
 {
-	u32 i = 0;
-	u32 device_state_change = 0;
-	u32 pcie_word_val = 0;
-	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
 	unsigned long flags;
-	mhi_log(MHI_MSG_INFO, "Processing M0 state transition\n");
+	mhi_log(MHI_MSG_VERBOSE, "Processing M0 state transition\n");
 
 	/* Wait for mhi_dev_ctxt transition to M0 */
-	device_state_change = 0;
-	while (!device_state_change) {
-		if (++i >= 10) {
-			mhi_log(MHI_MSG_ERROR,
-					"Time out! STATUS register not M0.\n");
-			ret_val = MHI_STATUS_DEVICE_NOT_READY;
-			break;
-		} else {
-			pcie_word_val = pcie_read(mhi_dev_ctxt->mmio_addr,
-							MHISTATUS);
-			MHI_READ_FIELD(pcie_word_val,
-					MHISTATUS_MHISTATE_MASK,
-					MHISTATUS_MHISTATE_SHIFT);
-			if (pcie_word_val == MHI_STATE_M0) {
-				device_state_change = 1;
-			} else {
-				mhi_log(MHI_MSG_ERROR,
-					"STATUS register not M0, is 0x%x retry %d\n",
-					i, pcie_word_val);
-				msleep(1000);
-			}
-		}
 		/* Proxy vote to prevent M3 while we are ringing DBs */
-		if (mhi_dev_ctxt->mhi_state == MHI_STATE_M2)
-			mhi_dev_ctxt->m2_m0++;
-		else if (mhi_dev_ctxt->mhi_state == MHI_STATE_M3)
+	if (mhi_dev_ctxt->mhi_state == MHI_STATE_M2)
+		mhi_dev_ctxt->m2_m0++;
+	else if (mhi_dev_ctxt->mhi_state == MHI_STATE_M3)
 			mhi_dev_ctxt->m3_m0++;
 		mhi_dev_ctxt->mhi_state = MHI_STATE_M0;
-	}
 	if (mhi_dev_ctxt->mhi_initialized) {
 		/* Bump up the vote for pending data */
 		read_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
@@ -327,12 +313,11 @@ MHI_STATUS process_M0_transition(mhi_device_ctxt *mhi_dev_ctxt,
 		ring_all_ev_dbs(mhi_dev_ctxt);
 		ring_all_chan_dbs(mhi_dev_ctxt);
 		ring_all_cmd_dbs(mhi_dev_ctxt);
+		wake_up_interruptible(mhi_dev_ctxt->M0_event);
 		atomic_dec(&mhi_dev_ctxt->data_pending);
-	}
-	if (mhi_dev_ctxt->mhi_initialized &&
-	    mhi_dev_ctxt->pending_M3 == 0)
-		gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 0);
+	} else {
 	wake_up_interruptible(mhi_dev_ctxt->M0_event);
+	}
 	return MHI_STATUS_SUCCESS;
 }
 
@@ -377,7 +362,7 @@ void ring_all_chan_dbs(mhi_device_ctxt *mhi_dev_ctxt)
 				(uintptr_t)local_ctxt->rp);
 			db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 				(uintptr_t)local_ctxt->wp);
-			if ((rp != db_value) && (i % 2 == 0))
+			if ((rp != db_value) && ((i % 2) == 0))
 				conditional_chan_db_write(mhi_dev_ctxt, i);
 			else
 				conditional_chan_db_write(mhi_dev_ctxt, i);
@@ -416,7 +401,7 @@ void conditional_chan_db_write(mhi_device_ctxt *mhi_dev_ctxt, u32 chan)
 }
 
 MHI_STATUS process_M1_transition(mhi_device_ctxt  *mhi_dev_ctxt,
-		mhi_state_work_item *cur_work_item)
+		STATE_TRANSITION cur_work_item)
 {
 	mhi_log(MHI_MSG_INFO,
 			"Processing M1 state transition from state %d\n",
@@ -424,6 +409,26 @@ MHI_STATUS process_M1_transition(mhi_device_ctxt  *mhi_dev_ctxt,
 	mhi_log(MHI_MSG_INFO, "Allowing transition to M2\n");
 	mhi_dev_ctxt->m0_m1++;
 	mhi_dev_ctxt->mhi_state = MHI_STATE_M2;
+	/*
+	mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+		"Cancelling Inactivity timer\n");
+	/
+	switch(hrtimer_try_to_cancel(&mhi_dev_ctxt->inactivity_tmr))
+	{
+	case 0:
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+			"Timer was not active\n");
+		break;
+	case 1:
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+			"Timer was active\n");
+		break;
+	case -1:
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+			"Timer executing and can't stop\n");
+	} */
+	wmb();
+	//TODO:  Stop xfers from occuring?
 	MHI_REG_WRITE_FIELD(mhi_dev_ctxt->mmio_addr, MHICTRL,
 			MHICTRL_MHISTATE_MASK,
 			MHICTRL_MHISTATE_SHIFT,
@@ -433,7 +438,7 @@ MHI_STATUS process_M1_transition(mhi_device_ctxt  *mhi_dev_ctxt,
 	return MHI_STATUS_SUCCESS;
 }
 MHI_STATUS process_BHI_transition(mhi_device_ctxt *mhi_dev_ctxt,
-			mhi_state_work_item *cur_work_item)
+			STATE_TRANSITION cur_work_item)
 {
 	mhi_dev_ctxt->mhi_state = MHI_STATE_BHI;
 	mhi_log(MHI_MSG_INFO, "Processing BHI state transition\n");
@@ -441,7 +446,7 @@ MHI_STATUS process_BHI_transition(mhi_device_ctxt *mhi_dev_ctxt,
 }
 
 MHI_STATUS process_READY_transition(mhi_device_ctxt *mhi_dev_ctxt,
-			mhi_state_work_item *cur_work_item)
+			STATE_TRANSITION cur_work_item)
 {
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
 	mhi_log(MHI_MSG_INFO, "Processing READY state transition\n");
@@ -459,7 +464,7 @@ MHI_STATUS process_READY_transition(mhi_device_ctxt *mhi_dev_ctxt,
 		return MHI_STATUS_ERROR;
 	}
 	ret_val = mhi_add_elements_to_event_rings(mhi_dev_ctxt,
-				cur_work_item->new_state);
+				cur_work_item);
 	if (MHI_STATUS_SUCCESS != ret_val) {
 		mhi_log(MHI_MSG_ERROR,
 			"Failure during event ring init\n");
@@ -472,10 +477,17 @@ MHI_STATUS process_READY_transition(mhi_device_ctxt *mhi_dev_ctxt,
 	return MHI_STATUS_SUCCESS;
 }
 MHI_STATUS process_RESET_transition(mhi_device_ctxt *mhi_dev_ctxt,
-			mhi_state_work_item *cur_work_item)
+			STATE_TRANSITION cur_work_item)
 {
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
 	mhi_log(MHI_MSG_INFO, "Processing RESET state transition\n");
+	mhi_dev_ctxt->mhi_reset_cntr++;
+	WARN_ON(1);
+	/*
+	if (mhi_dev_ctxt->mhi_reset_cntr >= 2) {
+		print_state_transitions(mhi_dev_ctxt);
+		dump_stack();
+	} */
 	ret_val = mhi_test_for_device_ready(mhi_dev_ctxt);
 	switch (ret_val) {
 	case MHI_STATUS_SUCCESS:
@@ -506,7 +518,7 @@ MHI_STATUS process_RESET_transition(mhi_device_ctxt *mhi_dev_ctxt,
 	return ret_val;
 }
 MHI_STATUS process_SYSERR_transition(mhi_device_ctxt *mhi_dev_ctxt,
-			mhi_state_work_item *cur_work_item)
+			STATE_TRANSITION cur_work_item)
 {
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
 	mhi_log(MHI_MSG_CRITICAL, "Received SYS ERROR. Resetting MHI\n");
@@ -524,18 +536,21 @@ MHI_STATUS process_SYSERR_transition(mhi_device_ctxt *mhi_dev_ctxt,
 }
 
 MHI_STATUS process_M3_transition(mhi_device_ctxt *mhi_dev_ctxt,
-		mhi_state_work_item *cur_work_item)
+		STATE_TRANSITION cur_work_item)
 {
+	unsigned long flags;
 	mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
 			"Processing M3 state transition\n");
+	write_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
 	mhi_dev_ctxt->mhi_state = MHI_STATE_M3;
 	mhi_dev_ctxt->pending_M3 = 0;
-	mhi_dev_ctxt->m0_m3++;
 	wake_up_interruptible(mhi_dev_ctxt->M3_event);
+	write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
+	mhi_dev_ctxt->m0_m3++;
 	return MHI_STATUS_SUCCESS;
 }
 MHI_STATUS process_SBL_transition(mhi_device_ctxt *mhi_dev_ctxt,
-				mhi_state_work_item *cur_work_item)
+				STATE_TRANSITION cur_work_item)
 {
 	MHI_STATUS ret_val;
 	u32 chan;
@@ -562,7 +577,7 @@ MHI_STATUS process_SBL_transition(mhi_device_ctxt *mhi_dev_ctxt,
 	return MHI_STATUS_SUCCESS;
 }
 MHI_STATUS process_AMSS_transition(mhi_device_ctxt *mhi_dev_ctxt,
-				mhi_state_work_item *cur_work_item)
+				STATE_TRANSITION cur_work_item)
 {
 	MHI_STATUS ret_val;
 	u32 chan;
@@ -595,7 +610,7 @@ MHI_STATUS process_AMSS_transition(mhi_device_ctxt *mhi_dev_ctxt,
 		atomic_read(&mhi_dev_ctxt->start_cmd_pending_ack) == 0);
 	if (0 == mhi_dev_ctxt->mhi_initialized) {
 		ret_val = mhi_add_elements_to_event_rings(mhi_dev_ctxt,
-					cur_work_item->new_state);
+					cur_work_item);
 		if (MHI_STATUS_SUCCESS != ret_val)
 			return MHI_STATUS_ERROR;
 		mhi_dev_ctxt->mhi_initialized = 1;

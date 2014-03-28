@@ -213,7 +213,6 @@ typedef struct mhi_stop_chan_cmd_pkt {
 	u32 reserved1;
 	u32 reserved2;
 	u32 reserved3;
-	u32 info;
 } mhi_stop_chan_cmd_pkt;
 typedef struct mhi_ee_state_change_event {
 	u64 reserved1;
@@ -312,7 +311,7 @@ typedef enum MHI_INIT_ERROR_STAGE {
 	MHI_INIT_ERROR_STAGE_RESERVED = 0x80000000
 } MHI_INIT_ERROR_STAGE;
 
-typedef enum MHI_STATE_TRANSITION {
+typedef enum STATE_TRANSITION {
 	STATE_TRANSITION_RESET = 0x0,
 	STATE_TRANSITION_READY = 0x1,
 	STATE_TRANSITION_M0 = 0x2,
@@ -324,15 +323,12 @@ typedef enum MHI_STATE_TRANSITION {
 	STATE_TRANSITION_AMSS = 0x8,
 	STATE_TRANSITION_SYS_ERR = 0xFF,
 	STATE_TRANSITION_reserved = 0x80000000
-} MHI_STATE_TRANSITION;
+} STATE_TRANSITION;
 
 typedef enum MHI_EXEC_ENV {
 	MHI_EXEC_ENV_SBL = 0x1,
 	MHI_EXEC_ENV_AMSS = 0x2,
 } MHI_EXEC_ENV;
-typedef struct mhi_state_work_item {
-	MHI_STATE_TRANSITION new_state;
-} mhi_state_work_item;
 
 typedef struct mhi_client_handle {
 	mhi_device_ctxt *mhi_dev_ctxt;
@@ -358,7 +354,7 @@ typedef struct mhi_state_work_queue {
 	struct mutex *q_mutex;
 	mhi_ring q_info;
 	u32 queue_full_cntr;
-	mhi_state_work_item buf[MHI_WORK_Q_MAX_SIZE];
+	STATE_TRANSITION buf[MHI_WORK_Q_MAX_SIZE];
 } mhi_state_work_queue;
 
 typedef struct mhi_control_seg {
@@ -408,7 +404,7 @@ struct mhi_device_ctxt {
 	u32 pending_M3;
 	u32 mhi_chan_db_order[MHI_MAX_CHANNELS];
 	spinlock_t *db_write_lock;
-	u32 mhi_ev_db_order[EVENT_RINGS_ALLOCATED];
+	u32 mhi_ev_db_order[MHI_MAX_CHANNELS];
 	MHI_THREAD_STATE event_thread_state;
 	MHI_THREAD_STATE state_change_thread_state;
 	struct platform_device *mhi_uci_dev;
@@ -433,17 +429,25 @@ struct mhi_device_ctxt {
 	u32 m2_m0;
 	u32 m0_m3;
 	u32 m3_m0;
+	u32 mhi_reset_cntr;
+	u32 mhi_ready_cntr;
+	u32 m3_event_timeouts;
+	u32 m0_event_timeouts;
 	rwlock_t xfer_lock;
 	hrtimer inactivity_tmr;
 	ktime_t inactivity_timeout;
 	mhi_counters mhi_chan_cntr[MHI_MAX_CHANNELS];
 	u32 ev_counter[EVENT_RINGS_ALLOCATED];
+	struct msm_bus_scale_pdata bus_scale_table;
+	struct msm_bus_vectors bus_vectors[2];
+	struct msm_bus_paths usecase[2];
+	u32 bus_client;
 };
 
 MHI_STATUS mhi_reset_all_thread_queues(mhi_device_ctxt *mhi_dev_ctxt);
 
 MHI_STATUS mhi_add_elements_to_event_rings(mhi_device_ctxt *mhi_dev_ctxt,
-					MHI_STATE_TRANSITION new_state);
+					STATE_TRANSITION new_state);
 MHI_STATUS validate_xfer_el_addr(mhi_chan_ctxt *ring, uintptr_t addr);
 int get_nr_avail_ring_elements(mhi_ring *ring);
 MHI_STATUS get_nr_enclosed_el(mhi_ring *ring, void *loc_1,
@@ -539,30 +543,30 @@ MHI_STATUS parse_inbound(mhi_device_ctxt *mhi_dev_ctxt, u32 chan,
 int mhi_state_change_thread(void *ctxt);
 MHI_STATUS mhi_init_state_change_thread_work_queue(mhi_state_work_queue *q);
 MHI_STATUS mhi_init_state_transition(mhi_device_ctxt *mhi_dev_ctxt,
-					MHI_STATE_TRANSITION new_state);
+					STATE_TRANSITION new_state);
 MHI_STATUS mhi_set_state_of_all_channels(mhi_device_ctxt *mhi_dev_ctxt,
 					MHI_CHAN_STATE new_state);
 void ring_all_chan_dbs(mhi_device_ctxt *mhi_dev_ctxt);
 MHI_STATUS process_stt_work_item(mhi_device_ctxt  *mhi_dev_ctxt,
-			mhi_state_work_item *cur_work_item);
+			STATE_TRANSITION cur_work_item);
 MHI_STATUS process_M0_transition(mhi_device_ctxt  *mhi_dev_ctxt,
-			mhi_state_work_item *cur_work_item);
+			STATE_TRANSITION cur_work_item);
 MHI_STATUS process_M1_transition(mhi_device_ctxt  *mhi_dev_ctxt,
-			mhi_state_work_item *cur_work_item);
+			STATE_TRANSITION cur_work_item);
 MHI_STATUS process_M3_transition(mhi_device_ctxt  *mhi_dev_ctxt,
-			mhi_state_work_item *cur_work_item);
+			STATE_TRANSITION cur_work_item);
 MHI_STATUS process_READY_transition(mhi_device_ctxt *mhi_dev_ctxt,
-			mhi_state_work_item *cur_work_item);
+			STATE_TRANSITION cur_work_item);
 MHI_STATUS process_RESET_transition(mhi_device_ctxt *mhi_dev_ctxt,
-			mhi_state_work_item *cur_work_item);
+			STATE_TRANSITION cur_work_item);
 MHI_STATUS process_SYSERR_transition(mhi_device_ctxt *mhi_dev_ctxt,
-			mhi_state_work_item *cur_work_item);
+			STATE_TRANSITION cur_work_item);
 MHI_STATUS process_BHI_transition(mhi_device_ctxt *mhi_dev_ctxt,
-			mhi_state_work_item *cur_work_item);
+			STATE_TRANSITION cur_work_item);
 MHI_STATUS process_AMSS_transition(mhi_device_ctxt *mhi_dev_ctxt,
-				mhi_state_work_item *cur_work_item);
+				STATE_TRANSITION cur_work_item);
 MHI_STATUS process_SBL_transition(mhi_device_ctxt *mhi_dev_ctxt,
-				mhi_state_work_item *cur_work_item);
+				STATE_TRANSITION cur_work_item);
 MHI_STATUS mhi_wait_for_mdm(mhi_device_ctxt *mhi_dev_ctxt);
 void conditional_chan_db_write(mhi_device_ctxt *mhi_dev_ctxt, u32 chan);
 void ring_all_ev_dbs(mhi_device_ctxt *mhi_dev_ctxt);
