@@ -406,7 +406,7 @@ struct mhi_device_ctxt {
 	wait_queue_head_t *M3_event;
 	wait_queue_head_t *chan_start_complete;
 	u32 pending_M3;
-	atomic_t mhi_chan_db_order[MHI_MAX_CHANNELS];
+	u32 mhi_chan_db_order[MHI_MAX_CHANNELS];
 	spinlock_t *db_write_lock;
 
 	MHI_THREAD_STATE event_thread_state;
@@ -421,6 +421,7 @@ struct mhi_device_ctxt {
 	u32 mhi_initialized;
 	atomic_t events_pending;
 	atomic_t start_cmd_pending_ack;
+	u32 cmd_ring_order;
 	u32 alloced_ev_rings[EVENT_RINGS_ALLOCATED];
 	u32 ev_ring_props[EVENT_RINGS_ALLOCATED];
 	u32 msi_counter[EVENT_RINGS_ALLOCATED];
@@ -562,7 +563,7 @@ MHI_STATUS process_AMSS_transition(mhi_device_ctxt *mhi_dev_ctxt,
 				mhi_state_work_item *cur_work_item);
 MHI_STATUS process_SBL_transition(mhi_device_ctxt *mhi_dev_ctxt,
 				mhi_state_work_item *cur_work_item);
-MHI_STATUS mhi_wait_for_link_stability(mhi_device_ctxt *mhi_dev_ctxt);
+MHI_STATUS mhi_wait_for_mdm(mhi_device_ctxt *mhi_dev_ctxt);
 void conditional_db_write(mhi_device_ctxt *mhi_dev_ctxt, u32 chan);
 
 int mhi_initiate_M3(mhi_device_ctxt *mhi_dev_ctxt);
