@@ -130,15 +130,9 @@ typedef enum MHI_CLIENT_CHANNEL {
 	MHI_CLIENT_RESERVED_1_UPPER = 99,
 	MHI_CLIENT_IP_HW_0_OUT = 100,
 	MHI_CLIENT_IP_HW_0_IN = 101,
-	MHI_CLIENT_IP_HW_1_OUT = 102,
-	MHI_CLIENT_IP_HW_1_IN = 103,
-	MHI_CLIENT_IP_HW_2_OUT = 104,
-	MHI_CLIENT_IP_HW_2_IN = 105,
-	MHI_CLIENT_IP_HW_3_OUT = 106,
-	MHI_CLIENT_IP_HW_3_IN = 107,
-	MHI_CLIENT_RESERVED_2_LOWER = 108,
+	MHI_CLIENT_RESERVED_2_LOWER = 102,
 	MHI_CLIENT_RESERVED_2_UPPER = 127,
-	MHI_MAX_CHANNELS = 108
+	MHI_MAX_CHANNELS = 102
 } MHI_CLIENT_CHANNEL;
 
 typedef struct bhi_ctxt_t {
@@ -202,8 +196,8 @@ typedef enum MHI_STATE {
 	MHI_STATE_M1 = 0x3,
 	MHI_STATE_M2 = 0x4,
 	MHI_STATE_M3 = 0x5,
-	MHI_STATE_LIMIT = 0x6,
 	MHI_STATE_BHI  = 0x7,
+	MHI_STATE_LIMIT = 0x8,
 	MHI_STATE_reserved = 0x80000000
 } MHI_STATE;
 
@@ -260,6 +254,7 @@ typedef enum MHI_PKT_TYPE {
 	MHI_PKT_TYPE_STATE_CHANGE_EVENT = 0x20,
 	MHI_PKT_TYPE_CMD_COMPLETION_EVENT = 0x21,
 	MHI_PKT_TYPE_TX_EVENT = 0x22,
+	MHI_PKT_TYPE_EE_EVENT = 0x40,
 } MHI_PKT_TYPE;
 
 #pragma pack(1)
@@ -296,6 +291,12 @@ typedef struct mhi_stop_chan_cmd_pkt {
 	u32 info;
 } mhi_stop_chan_cmd_pkt;
 
+typedef struct mhi_ee_state_change_event {
+	u64 reserved1;
+	u32 exec_env;
+	u32 info;
+} mhi_ee_state_change_event;
+
 typedef struct mhi_xfer_event_pkt {
 	volatile u64 xfer_ptr;
 	volatile u32 xfer_details;
@@ -331,6 +332,7 @@ typedef union mhi_event_pkt {
 	mhi_xfer_event_pkt xfer_event_pkt;
 	mhi_cmd_complete_event_pkt cmd_complete_event_pkt;
 	mhi_state_change_event_pkt state_change_event_pkt;
+	mhi_ee_state_change_event ee_event_pkt;
 	mhi_xfer_event_pkt type;
 } mhi_event_pkt;
 
@@ -394,14 +396,20 @@ typedef enum MHI_STATE_TRANSITION {
 	STATE_TRANSITION_M2 = 0x4,
 	STATE_TRANSITION_M3 = 0x5,
 	STATE_TRANSITION_BHI = 0x6,
+	STATE_TRANSITION_SBL = 0x7,
+	STATE_TRANSITION_AMSS = 0x8,
 	STATE_TRANSITION_SYS_ERR = 0xFF,
 	STATE_TRANSITION_reserved = 0x80000000
 } MHI_STATE_TRANSITION;
 
+typedef enum MHI_EXEC_ENV {
+	MHI_EXEC_ENV_SBL = 0x1,
+	MHI_EXEC_ENV_AMSS = 0x2,
+} MHI_EXEC_ENV;
+
 typedef struct mhi_state_work_item {
 	MHI_STATE_TRANSITION new_state;
 } mhi_state_work_item;
-
 
 typedef enum MHI_EVENT_POLLING {
 	MHI_EVENT_POLLING_DISABLED = 0x0,
@@ -486,6 +494,7 @@ struct mhi_device_ctxt {
 	wait_queue_head_t *state_change_event_handle;
 	wait_queue_head_t *M0_event;
 	wait_queue_head_t *M3_event;
+	wait_queue_head_t *chan_start_complete;
 	u32 pending_M3;
 	atomic_t mhi_chan_db_order[MHI_MAX_CHANNELS];
 	spinlock_t *db_write_lock;
@@ -500,6 +509,7 @@ struct mhi_device_ctxt {
 	atomic_t data_pending;
 	u32 mhi_initialized;
 	atomic_t events_pending;
+	atomic_t start_cmd_pending_ack;
 	u32 alloced_ev_rings[EVENT_RINGS_ALLOCATED];
 	u32 ev_ring_props[EVENT_RINGS_ALLOCATED];
 	u32 hw_intmod_rate;
@@ -651,6 +661,10 @@ MHI_STATUS process_SYSERR_transition(mhi_device_ctxt *mhi_dev_ctxt,
 			mhi_state_work_item *cur_work_item);
 MHI_STATUS process_BHI_transition(mhi_device_ctxt *mhi_dev_ctxt,
 			mhi_state_work_item *cur_work_item);
+MHI_STATUS process_AMSS_transition(mhi_device_ctxt *mhi_dev_ctxt,
+				mhi_state_work_item *cur_work_item);
+MHI_STATUS process_SBL_transition(mhi_device_ctxt *mhi_dev_ctxt,
+				mhi_state_work_item *cur_work_item);
 MHI_STATUS mhi_wait_for_link_stability(mhi_device_ctxt *mhi_dev_ctxt);
 void conditional_db_write(mhi_device_ctxt *mhi_dev_ctxt, u32 chan);
 
