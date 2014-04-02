@@ -196,11 +196,15 @@ MHI_STATUS mhi_init_state_transition(mhi_device_ctxt *mhi_dev_ctxt,
 		mhi_log(MHI_MSG_CRITICAL, "No Room left on STT work queue\n");
 		return MHI_STATUS_ERROR;
 	}
+	mhi_log(MHI_MSG_VERBOSE,
+		"Processing state transition %x\n",
+		new_state);
 	cur_work_item = stt_ring->wp;
 	cur_work_item->new_state = new_state;
 	ret_val = ctxt_add_element(stt_ring, (void **)&cur_work_item);
+	wmb();
 	MHI_ASSERT(MHI_STATUS_SUCCESS == ret_val);
-	wake_up(mhi_dev_ctxt->state_change_event_handle);
+	wake_up_interruptible(mhi_dev_ctxt->state_change_event_handle);
 	return ret_val;
 }
 
@@ -300,7 +304,8 @@ MHI_STATUS process_M0_transition(mhi_device_ctxt *mhi_dev_ctxt,
 				device_state_change = 1;
 			} else {
 				mhi_log(MHI_MSG_ERROR,
-						"STATUS register not M0\n");
+					"STATUS register not M0, is 0x%x retry %d\n",
+					i, pcie_word_val);
 				msleep(1000);
 			}
 		}
@@ -319,7 +324,7 @@ MHI_STATUS process_M0_transition(mhi_device_ctxt *mhi_dev_ctxt,
 	if (mhi_dev_ctxt->mhi_initialized &&
 	    mhi_dev_ctxt->pending_M3 == 0)
 		gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 0);
-	wake_up(mhi_dev_ctxt->M0_event);
+	wake_up_interruptible(mhi_dev_ctxt->M0_event);
 	return MHI_STATUS_SUCCESS;
 }
 
@@ -471,7 +476,7 @@ MHI_STATUS process_M3_transition(mhi_device_ctxt *mhi_dev_ctxt,
 	mhi_dev_ctxt->mhi_state = MHI_STATE_M3;
 	mhi_dev_ctxt->pending_M3 = 0;
 	mhi_dev_ctxt->m0_m3++;
-	wake_up(mhi_dev_ctxt->M3_event);
+	wake_up_interruptible(mhi_dev_ctxt->M3_event);
 	return MHI_STATUS_SUCCESS;
 }
 MHI_STATUS process_SBL_transition(mhi_device_ctxt *mhi_dev_ctxt,

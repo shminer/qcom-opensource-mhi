@@ -385,7 +385,7 @@ MHI_STATUS mhi_send_cmd(mhi_device_ctxt *mhi_dev_ctxt,
 			"Invalid channel id, received id: 0x%x", chan);
 		goto error_general;
 	}
-
+	gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
 	/*If there is a cmd pending a device confirmation, do not send anymore
 	  for this channel */
 	if (MHI_CMD_PENDING == mhi_dev_ctxt->mhi_chan_pend_cmd_ack[chan])
@@ -465,6 +465,7 @@ MHI_STATUS mhi_send_cmd(mhi_device_ctxt *mhi_dev_ctxt,
 
 	mhi_dev_ctxt->mhi_chan_pend_cmd_ack[chan] = MHI_CMD_PENDING;
 	MHI_WRITE_DB(mhi_dev_ctxt->cmd_db_addr, 0, db_value);
+	mhi_log(MHI_MSG_VERBOSE, "Sent command 0x%x for chan 0x%x\n", cmd, chan);
 	mutex_unlock(&mhi_dev_ctxt->mhi_cmd_mutex_list[PRIMARY_CMD_RING]);
 
 	return MHI_STATUS_SUCCESS;
@@ -737,7 +738,7 @@ MHI_STATUS parse_cmd_event(mhi_device_ctxt *mhi_dev_ctxt, mhi_event_pkt *ev_pkt)
 				mhi_log(MHI_MSG_INFO,
 					"Failed to process reset cmd\n");
 			atomic_dec(&mhi_dev_ctxt->start_cmd_pending_ack);
-			wake_up(mhi_dev_ctxt->chan_start_complete);
+			wake_up_interruptible(mhi_dev_ctxt->chan_start_complete);
 			break;
 		}
 		default:
@@ -761,13 +762,22 @@ MHI_STATUS parse_cmd_event(mhi_device_ctxt *mhi_dev_ctxt, mhi_event_pkt *ev_pkt)
 MHI_STATUS reset_chan_cmd(mhi_device_ctxt *mhi_dev_ctxt, mhi_cmd_pkt *cmd_pkt)
 {
 	u32 chan  = 0;
-
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
 	mhi_ring *local_chan_ctxt;
 	mhi_chan_ctxt *chan_ctxt;
 	mhi_client_handle *client_handle = NULL;
+	struct mutex *chan_mutex;
 
 	MHI_TRB_GET_INFO(CMD_TRB_CHID, cmd_pkt, chan);
+
+	if (!VALID_CHAN_NR(chan)) {
+		mhi_log(MHI_MSG_ERROR,
+			"Bad channel number for CCE\n");
+		return MHI_STATUS_ERROR;
+	}
+
+	chan_mutex = &mhi_dev_ctxt->mhi_chan_mutex[chan];
+	mutex_lock(chan_mutex);
 	client_handle = mhi_dev_ctxt->client_handle_list[chan];
 	local_chan_ctxt = &mhi_dev_ctxt->mhi_local_chan_ctxt[chan];
 	chan_ctxt = &mhi_dev_ctxt->mhi_ctrl_seg->mhi_cc_list[chan];
@@ -784,9 +794,14 @@ MHI_STATUS reset_chan_cmd(mhi_device_ctxt *mhi_dev_ctxt, mhi_cmd_pkt *cmd_pkt)
 	chan_ctxt->mhi_trb_write_ptr = chan_ctxt->mhi_trb_ring_base_addr;
 
 	mhi_dev_ctxt->mhi_chan_pend_cmd_ack[chan] = MHI_CMD_NOT_PENDING;
+	mutex_unlock(chan_mutex);
+	mhi_log(MHI_MSG_INFO, "Reset complete starting channel back up.\n");
+	if (MHI_STATUS_SUCCESS != mhi_send_cmd(mhi_dev_ctxt,
+						MHI_COMMAND_START_CHAN,
+						chan))
+		mhi_log(MHI_MSG_CRITICAL, "Failed to restart channel.\n");
 	if (NULL != client_handle)
 		complete(&client_handle->chan_close_complete);
-
 	return ret_val;
 }
 MHI_STATUS start_chan_cmd(mhi_device_ctxt *mhi_dev_ctxt, mhi_cmd_pkt *cmd_pkt)
@@ -795,6 +810,8 @@ MHI_STATUS start_chan_cmd(mhi_device_ctxt *mhi_dev_ctxt, mhi_cmd_pkt *cmd_pkt)
 	MHI_TRB_GET_INFO(CMD_TRB_CHID, cmd_pkt, chan);
 	if (!VALID_CHAN_NR(chan))
 		mhi_log(MHI_MSG_ERROR, "Bad chan: 0x%x\n", chan);
+	mhi_dev_ctxt->mhi_chan_pend_cmd_ack[chan] =
+					MHI_CMD_NOT_PENDING;
 
 	mhi_log(MHI_MSG_INFO, "Processed cmd channel start\n");
 	return MHI_STATUS_SUCCESS;
@@ -809,15 +826,16 @@ void mhi_poll_inbound(mhi_client_handle *client_handle,
 	mhi_device_ctxt *mhi_dev_ctxt = NULL;
 	u32 chan = 0;
 	mhi_ring *local_chan_ctxt;
+	struct mutex *chan_mutex = NULL;
 
 	if (NULL == client_handle || NULL == buf || 0 == buf_size ||
 			NULL == client_handle->mhi_dev_ctxt)
 		return;
-
 	mhi_dev_ctxt = client_handle->mhi_dev_ctxt;
 	chan = client_handle->chan;
 	local_chan_ctxt = &mhi_dev_ctxt->mhi_local_chan_ctxt[chan];
-
+	chan_mutex = &mhi_dev_ctxt->mhi_chan_mutex[chan];
+	mutex_lock(chan_mutex);
 	if ((local_chan_ctxt->rp != local_chan_ctxt->ack_rp)) {
 		pending_trb = (mhi_tx_pkt *)(local_chan_ctxt->ack_rp);
 		*buf = (uintptr_t)(pending_trb->buffer_ptr);
@@ -827,6 +845,7 @@ void mhi_poll_inbound(mhi_client_handle *client_handle,
 		*buf = 0;
 		*buf_size = 0;
 	}
+	mutex_unlock(chan_mutex);
 }
 
 MHI_STATUS mhi_client_recycle_trb(mhi_client_handle *client_handle)
@@ -839,8 +858,7 @@ MHI_STATUS mhi_client_recycle_trb(mhi_client_handle *client_handle)
 	u64 db_value;
 	local_ctxt = &client_handle->mhi_dev_ctxt->mhi_local_chan_ctxt[chan];
 
-	 mutex_lock(chan_mutex);
-
+	mutex_lock(chan_mutex);
 	MHI_TX_TRB_SET_LEN(TX_TRB_LEN,
 				(mhi_xfer_pkt *)local_ctxt->ack_rp,
 				TRB_MAX_DATA_SIZE);
@@ -893,6 +911,15 @@ MHI_STATUS parse_inbound(mhi_device_ctxt *mhi_dev_ctxt, u32 chan,
 
 	client_handle = mhi_dev_ctxt->client_handle_list[chan];
 	local_chan_ctxt = &mhi_dev_ctxt->mhi_local_chan_ctxt[chan];
+
+	if (mhi_dev_ctxt->mhi_local_chan_ctxt[chan].rp ==
+	    mhi_dev_ctxt->mhi_local_chan_ctxt[chan].wp) {
+		mhi_dev_ctxt->mhi_chan_cntr[chan].empty_ring_removal++;
+		return mhi_send_cmd(mhi_dev_ctxt,
+				    MHI_COMMAND_RESET_CHAN,
+				    chan);
+	}
+
 	if (NULL != mhi_dev_ctxt->client_handle_list[chan])
 		result = &mhi_dev_ctxt->client_handle_list[chan]->result;
 
@@ -926,21 +953,29 @@ MHI_STATUS parse_outbound(mhi_device_ctxt *mhi_dev_ctxt, u32 chan,
 			mhi_xfer_pkt *local_ev_trb_loc, u16 xfer_len)
 {
 	mhi_result *result = NULL;
+	MHI_STATUS ret_val = 0;
 	mhi_client_handle *client_handle = NULL;
 	mhi_ring *local_chan_ctxt = NULL;
 	local_chan_ctxt = &mhi_dev_ctxt->mhi_local_chan_ctxt[chan];
 	client_handle = mhi_dev_ctxt->client_handle_list[chan];
+
+	/* If ring is empty */
+	if (mhi_dev_ctxt->mhi_local_chan_ctxt[chan].rp ==
+	    mhi_dev_ctxt->mhi_local_chan_ctxt[chan].wp) {
+		mhi_dev_ctxt->mhi_chan_cntr[chan].empty_ring_removal++;
+		return mhi_send_cmd(mhi_dev_ctxt,
+					MHI_COMMAND_RESET_CHAN,
+					chan);
+	}
+
 	if (NULL != client_handle) {
 		result = &mhi_dev_ctxt->client_handle_list[chan]->result;
-
 		if (NULL != (&client_handle->client_info.mhi_xfer_cb) &&
 		   (0 == (client_handle->pkt_count % client_handle->cb_mod)))
 			client_handle->client_info.mhi_xfer_cb(result);
 	}
-
-	MHI_ASSERT(MHI_STATUS_SUCCESS ==
-		ctxt_del_element(&mhi_dev_ctxt->mhi_local_chan_ctxt[chan],
-				NULL));
+	ret_val = ctxt_del_element(&mhi_dev_ctxt->mhi_local_chan_ctxt[chan],
+						NULL);
 	return MHI_STATUS_SUCCESS;
 }
 
@@ -966,11 +1001,11 @@ MHI_STATUS mhi_wait_for_link_stability(mhi_device_ctxt *mhi_dev_ctxt)
 	while (0xFFFFffff == pcie_read(mhi_dev_ctxt->mmio_addr, MHIREGLEN)
 			&& j <= MHI_MAX_LINK_RETRIES) {
 		mhi_log(MHI_MSG_ERROR,
-				"LINK INSTABILITY DETECTED, retry %d\n", j);
+				"Could not access MDM retry %d\n", j);
 		msleep(MHI_LINK_STABILITY_WAIT_MS);
 		if (MHI_MAX_LINK_RETRIES == j) {
 			mhi_log(MHI_MSG_CRITICAL,
-				"LINK INSTABILITY DETECTED, FAILING!\n");
+				"Could not access MDM, FAILING!\n");
 			return MHI_STATUS_ERROR;
 		}
 		j++;
