@@ -112,27 +112,35 @@ static ssize_t mhi_dbgfs_chan_read(struct file *fp, char __user *buf,
 		return -EIO;
 	*offp = (u32)(*offp) % MHI_MAX_CHANNELS;
 	if (*offp == (MHI_MAX_CHANNELS - 1)) usleep(2);
+	while (!VALID_CHAN_NR(*offp)) {
+		*offp += 1;
+		*offp = (u32)(*offp) % MHI_MAX_CHANNELS;
+	}
+
 	chan_ctxt = &mhi_dev_ctxt->mhi_ctrl_seg->mhi_cc_list[*offp];
 	amnt_copied =
 	scnprintf(chan_info,
 		sizeof(chan_info),
-		"%s0x%x %s %d %s %d %s 0x%x %s 0x%llx %s %p %s %p %s %p\n",
+		"%s0x%x %s %d %s 0x%x %s 0x%llx %s %p %s %p %s %p %s %d %s %d\n",
 		"chan:",
 		(unsigned int)*offp,
-		"pkts to dev:",
-		mhi_dev_ctxt->mhi_chan_cntr[*offp].pkts_to_dev,
 		"pkts from dev:",
-		mhi_dev_ctxt->mhi_chan_cntr[*offp].pkts_from_dev,
-		"chan_state:",
+		mhi_dev_ctxt->mhi_chan_cntr[*offp].pkts_xferd,
+		"state:",
 		chan_ctxt->mhi_chan_state,
-		"chan_base phy:",
+		"p_base:",
 		chan_ctxt->mhi_trb_ring_base_addr,
-		"chan_base virt:",
+		"v_base:",
 		mhi_dev_ctxt->mhi_local_chan_ctxt[*offp].base,
-		"chan_wp virt:",
+		"v_wp:",
 		mhi_dev_ctxt->mhi_local_chan_ctxt[*offp].wp,
-		"chan_rp virt:",
-		mhi_dev_ctxt->mhi_local_chan_ctxt[*offp].rp);
+		"v_rp:",
+		mhi_dev_ctxt->mhi_local_chan_ctxt[*offp].rp,
+		"pkts_queued",
+		get_nr_avail_ring_elements(&mhi_dev_ctxt->mhi_local_chan_ctxt[*offp]),
+		"/",
+		mhi_get_chan_max_buffers(*offp));
+
 	*offp += 1;
 
 	if (amnt_copied < count)
@@ -147,6 +155,10 @@ static ssize_t mhi_dbgfs_ev_read(struct file *fp, char __user *buf,
 	int amnt_copied = 0;
 	int event_ring_index = 0;
 	mhi_event_ctxt *ev_ctxt;
+	uintptr_t v_wp_index;
+	uintptr_t v_rp_index;
+	uintptr_t device_p_rp_index;
+
 	mhi_device_ctxt *mhi_dev_ctxt = mhi_devices.device_list[0].mhi_ctxt;
 	if (NULL == mhi_dev_ctxt)
 		return -EIO;
@@ -154,28 +166,51 @@ static ssize_t mhi_dbgfs_ev_read(struct file *fp, char __user *buf,
 	event_ring_index = mhi_dev_ctxt->alloced_ev_rings[*offp];
 	ev_ctxt = &mhi_dev_ctxt->mhi_ctrl_seg->mhi_ec_list[event_ring_index];
 	if (*offp == (EVENT_RINGS_ALLOCATED - 1)) usleep(200000);
+
+
+	get_element_index(&mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index],
+			mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index].rp,
+			&v_rp_index);
+	get_element_index(&mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index],
+			mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index].wp,
+			&v_wp_index);
+	get_element_index(&mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index],
+			mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index].wp,
+			&v_wp_index);
+	get_element_index(&mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index],
+			(void *)mhi_p2v_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
+					ev_ctxt->mhi_event_read_ptr),
+			&device_p_rp_index);
+
 	amnt_copied =
 	scnprintf(chan_info,
 		sizeof(chan_info),
-		"%s 0x%08x %s %02x %s 0x%08x %s 0x%08x %s 0x%llx %s %llx %s %p %s %p %s %p\n",
+		"%s 0x%08x %s %02x %s 0x%08x %s 0x%08x %s 0x%llx %s %llx %s %lu %s %p %s %p %s %lu %s %p %s %lu\n",
 		"Event Context ",
 		(unsigned int)event_ring_index,
-		"Intmod Value",
+		"Intmod_T",
 		MHI_GET_EV_CTXT(EVENT_CTXT_INTMODT, ev_ctxt),
 		"MSI Vector",
 		ev_ctxt->mhi_msi_vector,
 		"MSI RX Count",
 		mhi_dev_ctxt->msi_counter[*offp],
-		"event_base phy:",
+		"p_base:",
 		ev_ctxt->mhi_event_ring_base_addr,
-		"event_rp phy:",
+		"p_rp:",
 		ev_ctxt->mhi_event_read_ptr,
-		"event base virt:",
+		"index:",
+		device_p_rp_index,
+		"v_base:",
 		mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index].base,
-		"event wp virt:",
+		"v_wp:",
 		mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index].wp,
-		"event rp virt:",
-		mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index].rp);
+		"index:",
+		v_wp_index,
+		"v_rp:",
+		mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index].rp,
+		"index:",
+		v_rp_index);
+
 	*offp += 1;
 	if (amnt_copied < count)
 		return amnt_copied -
