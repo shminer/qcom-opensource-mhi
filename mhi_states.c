@@ -120,11 +120,16 @@ int mhi_state_change_thread(void *ctxt)
  *
  * @return MHI_STATUS
  */
-MHI_STATUS mhi_reset_channel(mhi_device_ctxt *mhi_dev_ctxt, u32 chan_id)
+MHI_STATUS mhi_reset_channel(mhi_client_handle *client_handle)
 {
 	MHI_STATUS ret_val;
 	mhi_chan_ctxt *cur_ctxt = NULL;
+	mhi_device_ctxt *mhi_dev_ctxt = NULL;
+	u32 chan_id = 0;
 	mhi_ring *cur_ring = NULL;
+
+	chan_id = client_handle->chan;
+	mhi_dev_ctxt = client_handle->mhi_dev_ctxt;
 
 	if (chan_id > (MHI_MAX_CHANNELS - 1) || NULL == mhi_dev_ctxt) {
 		mhi_log(MHI_MSG_ERROR, "Bad input parameters\n");
@@ -311,6 +316,9 @@ MHI_STATUS process_M0_transition(mhi_device_ctxt *mhi_dev_ctxt,
 			atomic_dec(&mhi_dev_ctxt->data_pending);
 		}
 	}
+	if (mhi_dev_ctxt->mhi_initialized &&
+	    mhi_dev_ctxt->pending_M3 == 0)
+		gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 0);
 	wake_up(mhi_dev_ctxt->M0_event);
 	return MHI_STATUS_SUCCESS;
 }
@@ -473,7 +481,6 @@ MHI_STATUS process_SBL_transition(mhi_device_ctxt *mhi_dev_ctxt,
 	u32 chan;
 	mhi_chan_ctxt *chan_ctxt;
 	mhi_log(MHI_MSG_INFO, "Processing SBL state transition\n");
-
 	for (chan = 0; chan <= MHI_CLIENT_SAHARA_IN; ++chan)
 	{
 		chan_ctxt =
@@ -494,7 +501,6 @@ MHI_STATUS process_SBL_transition(mhi_device_ctxt *mhi_dev_ctxt,
 	}
 	return MHI_STATUS_SUCCESS;
 }
-
 MHI_STATUS process_AMSS_transition(mhi_device_ctxt *mhi_dev_ctxt,
 				mhi_state_work_item *cur_work_item)
 {
@@ -502,7 +508,6 @@ MHI_STATUS process_AMSS_transition(mhi_device_ctxt *mhi_dev_ctxt,
 	u32 chan;
 	mhi_chan_ctxt *chan_ctxt;
 	mhi_log(MHI_MSG_INFO, "Processing AMSS state transition\n");
-
 	for (chan = 0; chan <= MHI_MAX_CHANNELS; ++chan) {
 		if (VALID_CHAN_NR(chan)) {
 			chan_ctxt =

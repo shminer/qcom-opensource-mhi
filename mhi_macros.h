@@ -52,7 +52,6 @@
 #define MHI_MAX_TIMEOUT_MS 20000UL
 #define MHI_M1_ENTRY_DELAY_MS 30
 
-
 /* MHI GPIOs */
 #define MHI_DEVICE_WAKE_GPIO 108
 /* PCIe Device Info */

@@ -65,7 +65,6 @@ int mhi_probe(struct pci_dev *pcie_device,
 }
 void mhi_remove(struct pci_dev *mhi_device)
 {
-	rmnet_mhi_remove(NULL);
 	return;
 }
 
@@ -78,6 +77,8 @@ static int __init mhi_init(void)
 {
 	if (pci_register_driver(&mhi_pcie_driver))
 		return -EIO;
+	mhi_uci_init();
+	rmnet_mhi_init();
 	return 0;
 }
 
