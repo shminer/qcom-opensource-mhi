@@ -343,7 +343,9 @@ void ring_all_chan_dbs(mhi_device_ctxt *mhi_dev_ctxt)
 				(uintptr_t)local_ctxt->rp);
 			db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 				(uintptr_t)local_ctxt->wp);
-			if (rp != db_value)
+			if ((rp != db_value) && (i % 2 == 0))
+				conditional_db_write(mhi_dev_ctxt, i);
+			else
 				conditional_db_write(mhi_dev_ctxt, i);
 		}
 	/* Write the cmd ring */
