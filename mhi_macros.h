@@ -24,7 +24,7 @@
 #define ELEMENT_GAP 1
 #define MHI_EPID 4
 
-#define MAX_NR_MSI 2
+#define MAX_NR_MSI 3
 #define SOFTWARE_EVENT_RING 0
 
 #define EVENT_RINGS_ALLOCATED 3
@@ -291,4 +291,7 @@
 	(_CTXT)->mhi_intmodt |= new_val; \
 };
 
+#define MHI_GET_EV_CTXT(_FIELD, _CTXT) \
+	(((_CTXT)->mhi_intmodt >> MHI_##_FIELD ## __SHIFT) & \
+				 MHI_##_FIELD ## __MASK)
 #endif
