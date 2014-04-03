@@ -310,12 +310,12 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 
 	if (MHI_STATE_M0 == mhi_dev_ctxt->mhi_state ||
 		MHI_STATE_M1 == mhi_dev_ctxt->mhi_state) {
-		spin_lock(&mhi_dev_ctxt->db_write_lock[chan]);
+		spin_lock_irqsave(&mhi_dev_ctxt->db_write_lock[chan], flags);
 		mhi_dev_ctxt->mhi_chan_db_order[chan]++;
 		db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 			(uintptr_t)mhi_dev_ctxt->mhi_local_chan_ctxt[chan].wp);
 		MHI_WRITE_DB(mhi_dev_ctxt->channel_db_addr, chan, db_value);
-		spin_unlock(&mhi_dev_ctxt->db_write_lock[chan]);
+		spin_unlock_irqrestore(&mhi_dev_ctxt->db_write_lock[chan], flags);
 	} else {
 		mhi_log(MHI_MSG_INFO,
 			"Current MHI mhi_dev_ctxt state %d, not M0 or M1\n",
@@ -641,21 +641,24 @@ MHI_STATUS recycle_trb_and_ring(mhi_device_ctxt *mhi_dev_ctxt,
 		case MHI_RING_TYPE_EVENT_RING:
 		{
 			spinlock_t *lock = NULL;
+			unsigned long flags = 0;
 			lock = &mhi_dev_ctxt->mhi_ev_spinlock_list[ring_index];
-			spin_lock(lock);
+			spin_lock_irqsave(lock, flags);
 			mhi_dev_ctxt->mhi_ev_db_order[ring_index] = 1;
 				MHI_WRITE_DB(mhi_dev_ctxt->event_db_addr,
 						ring_index, db_value);
-			spin_unlock(lock);
+			spin_unlock_irqrestore(lock, flags);
 			break;
 		}
 		case MHI_RING_TYPE_XFER_RING:
 		{
-			spin_lock(&mhi_dev_ctxt->db_write_lock[ring_index]);
+			unsigned long flags = 0;
+			spin_lock_irqsave(&mhi_dev_ctxt->db_write_lock[ring_index], flags);
 			mhi_dev_ctxt->mhi_chan_db_order[ring_index] = 1;
 			MHI_WRITE_DB(mhi_dev_ctxt->channel_db_addr,
 					ring_index, db_value);
-			spin_unlock(&mhi_dev_ctxt->db_write_lock[ring_index]);
+			spin_unlock_irqrestore(&mhi_dev_ctxt->db_write_lock[ring_index],
+						flags);
 			break;
 		}
 		default:
