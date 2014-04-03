@@ -25,6 +25,7 @@ irqreturn_t irq_cb(int irq_number, void *dev_id)
 		mhi_log(MHI_MSG_ERROR, "Failed to get a proper context\n");
 		return IRQ_HANDLED;
 	}
+	mhi_dev_ctxt->msi_counter[IRQ_TO_MSI(mhi_dev_ctxt, irq_number)]++;
 	mhi_log(MHI_MSG_VERBOSE,
 			"Got MSI 0x%x\n",IRQ_TO_MSI(mhi_dev_ctxt, irq_number));
 	switch (IRQ_TO_MSI(mhi_dev_ctxt, irq_number)) {
@@ -202,6 +203,8 @@ void mhi_mask_irq(mhi_client_handle *client_handle)
 		client_handle->msi_vec);
 	if (client_handle == NULL)
 		return;
+	disable_irq_nosync(MSI_TO_IRQ(client_handle->mhi_dev_ctxt,
+					client_handle->msi_vec));
 }
 void mhi_unmask_irq(mhi_client_handle *client_handle)
 {
@@ -209,4 +212,6 @@ void mhi_unmask_irq(mhi_client_handle *client_handle)
 			client_handle->msi_vec);
 	if  (client_handle == NULL)
 		return;
+	enable_irq(MSI_TO_IRQ(client_handle->mhi_dev_ctxt,
+			client_handle->msi_vec));
 }
