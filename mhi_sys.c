@@ -29,6 +29,8 @@ static ssize_t mhi_dbgfs_state_read(struct file *fp, char __user *buf,
 				size_t count, loff_t *offp);
 static ssize_t mhi_dbgfs_ev_read(struct file *fp, char __user *buf,
 				size_t count, loff_t *offp);
+static ssize_t mhi_dbgfs_trigger_msi(struct file *fp, const char __user *buf,
+				size_t count, loff_t *offp);
 
 static const struct file_operations mhi_dbgfs_chan_fops = {
 .read = mhi_dbgfs_chan_read,
@@ -43,6 +45,20 @@ static const struct file_operations mhi_dbgfs_state_fops = {
 .read = mhi_dbgfs_state_read,
 .write = NULL,
 };
+static const struct file_operations mhi_dbgfs_trigger_msi_fops = {
+.read = NULL,
+.write = mhi_dbgfs_trigger_msi,
+};
+static ssize_t mhi_dbgfs_trigger_msi(struct file *fp, const char __user *buf,
+				size_t count, loff_t *offp)
+{
+	u32 msi_nr = 0;
+	void *irq_ctxt = &((mhi_devices.device_list[0]).pcie_device->dev);
+	if(copy_from_user(&msi_nr, buf, sizeof(msi_nr)))
+		return -ENOMEM;
+	irq_cb(msi_nr, irq_ctxt);
+	return 0;
+}
 
 static char chan_info[0x1000];
 int mhi_init_debugfs(mhi_device_ctxt *mhi_dev_ctxt)
@@ -70,6 +86,11 @@ int mhi_init_debugfs(mhi_device_ctxt *mhi_dev_ctxt)
 					mhi_parent_folder,
 					mhi_dev_ctxt,
 					&mhi_dbgfs_state_fops);
+	mhi_state_stats = debugfs_create_file("mhi_msi_trigger",
+					0444,
+					mhi_parent_folder,
+					mhi_dev_ctxt,
+					&mhi_dbgfs_trigger_msi_fops);
 	return 0;
 }
 static ssize_t mhi_dbgfs_state_read(struct file *fp, char __user *buf,
@@ -79,7 +100,7 @@ static ssize_t mhi_dbgfs_state_read(struct file *fp, char __user *buf,
 	mhi_device_ctxt *mhi_dev_ctxt = mhi_devices.device_list[0].mhi_ctxt;
 	if (NULL == mhi_dev_ctxt)
 		return -EIO;
-	usleep(100000);
+	msleep(100);
 	amnt_copied =
 	scnprintf(chan_info,
 			sizeof(chan_info),
@@ -108,20 +129,28 @@ static ssize_t mhi_dbgfs_chan_read(struct file *fp, char __user *buf,
 	int amnt_copied = 0;
 	mhi_chan_ctxt *chan_ctxt;
 	mhi_device_ctxt *mhi_dev_ctxt = mhi_devices.device_list[0].mhi_ctxt;
+	uintptr_t v_wp_index;
+	uintptr_t v_rp_index;
 	if (NULL == mhi_dev_ctxt)
 		return -EIO;
 	*offp = (u32)(*offp) % MHI_MAX_CHANNELS;
-	if (*offp == (MHI_MAX_CHANNELS - 1)) usleep(2);
+	if (*offp == (MHI_MAX_CHANNELS - 1)) msleep(100);
 	while (!VALID_CHAN_NR(*offp)) {
 		*offp += 1;
 		*offp = (u32)(*offp) % MHI_MAX_CHANNELS;
 	}
 
+	get_element_index(&mhi_dev_ctxt->mhi_local_chan_ctxt[*offp],
+			mhi_dev_ctxt->mhi_local_chan_ctxt[*offp].rp,
+			&v_rp_index);
+	get_element_index(&mhi_dev_ctxt->mhi_local_chan_ctxt[*offp],
+			mhi_dev_ctxt->mhi_local_chan_ctxt[*offp].wp,
+			&v_wp_index);
 	chan_ctxt = &mhi_dev_ctxt->mhi_ctrl_seg->mhi_cc_list[*offp];
 	amnt_copied =
 	scnprintf(chan_info,
 		sizeof(chan_info),
-		"%s0x%x %s %d %s 0x%x %s 0x%llx %s %p %s %p %s %p %s %d %s %d\n",
+		"%s0x%x %s %d %s 0x%x %s 0x%llx %s %p %s %p %s %lu %s %p %s %lu %s %d %s %d\n",
 		"chan:",
 		(unsigned int)*offp,
 		"pkts from dev:",
@@ -134,8 +163,12 @@ static ssize_t mhi_dbgfs_chan_read(struct file *fp, char __user *buf,
 		mhi_dev_ctxt->mhi_local_chan_ctxt[*offp].base,
 		"v_wp:",
 		mhi_dev_ctxt->mhi_local_chan_ctxt[*offp].wp,
+		"index:",
+		v_wp_index,
 		"v_rp:",
 		mhi_dev_ctxt->mhi_local_chan_ctxt[*offp].rp,
+		"index:",
+		v_rp_index,
 		"pkts_queued",
 		get_nr_avail_ring_elements(&mhi_dev_ctxt->mhi_local_chan_ctxt[*offp]),
 		"/",
@@ -165,7 +198,7 @@ static ssize_t mhi_dbgfs_ev_read(struct file *fp, char __user *buf,
 	*offp = (u32)(*offp) % EVENT_RINGS_ALLOCATED;
 	event_ring_index = mhi_dev_ctxt->alloced_ev_rings[*offp];
 	ev_ctxt = &mhi_dev_ctxt->mhi_ctrl_seg->mhi_ec_list[event_ring_index];
-	if (*offp == (EVENT_RINGS_ALLOCATED - 1)) usleep(200000);
+	if (*offp == (EVENT_RINGS_ALLOCATED - 1)) msleep(000);
 
 
 	get_element_index(&mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index],

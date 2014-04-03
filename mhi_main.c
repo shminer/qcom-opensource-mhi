@@ -159,19 +159,8 @@ MHI_STATUS mhi_open_channel(mhi_client_handle **client_handle,
 	else
 		(*client_handle)->cb_mod = 1;
 
-	if (chan == MHI_CLIENT_IP_HW_0_OUT) {
-		mhi_log(MHI_MSG_VERBOSE,
-			"Client opening chan 0x%x, Invalid intmod value 0x%x\n",
-			chan, client_info->intmod_t);
-		if (client_info->intmod_t == 0)
-			(*client_handle)->intmod_t = 2;
-		else
-			(*client_handle)->intmod_t =
-					client_info->intmod_t;
-		MHI_SET_EV_CTXT(EVENT_CTXT_INTMODT,
-			&mhi_ctrl_seg->mhi_ec_list[(*client_handle)->event_ring_index],
-			(*client_handle)->intmod_t);
-	}
+	if (IS_HARDWARE_CHANNEL(chan))
+		(*client_handle)->intmod_t = 3;
 	mhi_log(MHI_MSG_VERBOSE,
 		"Successfuly started chan 0x%x\n", chan);
 
@@ -287,19 +276,13 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	chan = client_handle->chan;
 
 
-	if (!mhi_performance_mode) {
 		/* Bump up the vote for pending data */
 		read_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
 
-		if (1 == atomic_add_return(1, &mhi_dev_ctxt->data_pending)) {
-			hrtimer_try_to_cancel(&mhi_dev_ctxt->inactivity_tmr);
-			mhi_dev_ctxt->m1_m0++;
-		}
-		gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
-		read_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
-	} else {
-		gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
-	}
+	atomic_inc(&mhi_dev_ctxt->data_pending);
+	mhi_dev_ctxt->m1_m0++;
+	gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
+	read_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 
 
 	/* Add the TRB to the correct transfer ring */
@@ -341,13 +324,7 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	}
 	/* If there are no clients still sending we can trigger our
 	 * inactivity timer */
-	if (!mhi_performance_mode) {
-	if (0 == atomic_sub_return(1, &mhi_dev_ctxt->data_pending)) {
-		hrtimer_start(&mhi_dev_ctxt->inactivity_tmr,
-			mhi_dev_ctxt->inactivity_timeout,
-			HRTIMER_MODE_REL);
-		}
-	}
+	atomic_dec(&mhi_dev_ctxt->data_pending);
 	return MHI_STATUS_SUCCESS;
 error:
 	atomic_dec(&mhi_dev_ctxt->data_pending);
