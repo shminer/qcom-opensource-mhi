@@ -403,6 +403,7 @@ MHI_STATUS mhi_init_event_ring(mhi_device_ctxt *mhi_dev_ctxt, u32 nr_ev_el,
 	mhi_event_pkt *ev_pkt = NULL;
 	u32 i = 0;
 	u64 db_value = 0;
+	unsigned long flags = 0;
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
 	spinlock_t *lock =
 		&mhi_dev_ctxt->mhi_ev_spinlock_list[event_ring_index];
@@ -413,7 +414,7 @@ MHI_STATUS mhi_init_event_ring(mhi_device_ctxt *mhi_dev_ctxt, u32 nr_ev_el,
 		return MHI_STATUS_ERROR;
 	}
 
-	spin_lock(lock);
+	spin_lock_irqsave(lock, flags);
 
 	mhi_log(MHI_MSG_INFO, "mmio_addr = 0x%lx, mmio_len = 0x%llx\n",
 			mhi_dev_ctxt->mmio_addr, mhi_dev_ctxt->mmio_len);
@@ -436,7 +437,7 @@ MHI_STATUS mhi_init_event_ring(mhi_device_ctxt *mhi_dev_ctxt, u32 nr_ev_el,
 					event_ring_index, db_value);
 	}
 
-	spin_unlock(lock);
+	spin_unlock_irqrestore(lock, flags);
 	return ret_val;
 }
 
