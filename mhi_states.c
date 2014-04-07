@@ -329,13 +329,17 @@ void ring_all_ev_dbs(mhi_device_ctxt *mhi_dev_ctxt)
 	mhi_event_ctxt *event_ctxt = NULL;
 	mhi_control_seg *mhi_ctrl = NULL;
 	spinlock_t *lock = NULL;
+	unsigned long flags;
 	mhi_ctrl = mhi_dev_ctxt->mhi_ctrl_seg;
+
 
 	for (i = 0; i < EVENT_RINGS_ALLOCATED; ++i) {
 		event_ring_index = mhi_dev_ctxt->alloced_ev_rings[i];
 		lock = &mhi_dev_ctxt->mhi_ev_spinlock_list[event_ring_index];
 		mhi_dev_ctxt->mhi_ev_db_order[event_ring_index] = 0;
-		spin_lock(lock);
+
+
+		spin_lock_irqsave(lock, flags);
 		event_ctxt = &mhi_ctrl->mhi_ec_list[event_ring_index];
 		db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 			(uintptr_t)mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index].wp);
@@ -345,7 +349,7 @@ void ring_all_ev_dbs(mhi_device_ctxt *mhi_dev_ctxt)
 				event_ring_index, db_value);
 		}
 		mhi_dev_ctxt->mhi_ev_db_order[event_ring_index] = 0;
-		spin_unlock(lock);
+		spin_unlock_irqrestore(lock, flags);
 	}
 }
 void ring_all_chan_dbs(mhi_device_ctxt *mhi_dev_ctxt)
@@ -388,8 +392,9 @@ void ring_all_cmd_dbs(mhi_device_ctxt *mhi_dev_ctxt)
 void conditional_chan_db_write(mhi_device_ctxt *mhi_dev_ctxt, u32 chan)
 {
 	u64 db_value;
+	unsigned long flags;
 	mhi_dev_ctxt->mhi_chan_db_order[chan] = 0;
-	spin_lock(&mhi_dev_ctxt->db_write_lock[chan]);
+	spin_lock_irqsave(&mhi_dev_ctxt->db_write_lock[chan], flags);
 	if (0 == mhi_dev_ctxt->mhi_chan_db_order[chan]) {
 		db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 			(uintptr_t)mhi_dev_ctxt->mhi_local_chan_ctxt[chan].wp);
@@ -397,7 +402,7 @@ void conditional_chan_db_write(mhi_device_ctxt *mhi_dev_ctxt, u32 chan)
 				chan, db_value);
 	}
 	mhi_dev_ctxt->mhi_chan_db_order[chan] = 0;
-	spin_unlock(&mhi_dev_ctxt->db_write_lock[chan]);
+	spin_unlock_irqrestore(&mhi_dev_ctxt->db_write_lock[chan], flags);
 }
 
 MHI_STATUS process_M1_transition(mhi_device_ctxt  *mhi_dev_ctxt,
