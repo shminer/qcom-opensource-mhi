@@ -101,7 +101,8 @@ MHI_STATUS mhi_process_event_ring(mhi_device_ctxt *mhi_dev_ctxt,
 	mhi_event_pkt *device_rp = NULL;
 	mhi_event_pkt event_to_process;
 	mhi_event_ctxt *ev_ctxt = NULL;
-	mhi_ring *local_ev_ctxt = &mhi_dev_ctxt->mhi_local_event_ctxt[ev_index];
+	mhi_ring *local_ev_ctxt =
+		&mhi_dev_ctxt->mhi_local_event_ctxt[ev_index];
 
 	ev_ctxt = &mhi_dev_ctxt->mhi_ctrl_seg->mhi_ec_list[ev_index];
 
@@ -139,7 +140,7 @@ MHI_STATUS mhi_process_event_ring(mhi_device_ctxt *mhi_dev_ctxt,
 			break;
 		case MHI_PKT_TYPE_STATE_CHANGE_EVENT:
 		{
-			MHI_STATE_TRANSITION new_state;
+			STATE_TRANSITION new_state;
 			new_state = MHI_READ_STATE(&event_to_process);
 			mhi_log(MHI_MSG_INFO,
 					"MHI STE received ring 0x%x\n",
@@ -149,7 +150,10 @@ MHI_STATUS mhi_process_event_ring(mhi_device_ctxt *mhi_dev_ctxt,
 		}
 		case MHI_PKT_TYPE_EE_EVENT:
 		{
-			MHI_STATE_TRANSITION new_state;
+			STATE_TRANSITION new_state;
+			mhi_log(MHI_MSG_INFO,
+					"MHI EEE received ring 0x%x\n",
+					ev_index);
 			switch(MHI_READ_EXEC_ENV(&event_to_process)) {
 			case MHI_EXEC_ENV_SBL:
 				new_state = STATE_TRANSITION_SBL;

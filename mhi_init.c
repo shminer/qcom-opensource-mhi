@@ -9,8 +9,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License for more details.
  */
-#include "mhi.h"
+
 #include "mhi_sys.h"
+#include "mhi.h"
 #include "mhi_hwio.h"
 
 MHI_STATUS mhi_clean_init_stage(mhi_device_ctxt *mhi_dev_ctxt,
@@ -118,14 +119,14 @@ MHI_STATUS mhi_init_device_ctxt(mhi_pcie_dev_info *dev_info,
 					MHI_INIT_ERROR_STAGE_DEVICE_CTRL);
 		return MHI_STATUS_ERROR;
 	}
+	if (MHI_STATUS_SUCCESS != mhi_spawn_threads(*mhi_device)) {
+		mhi_log(MHI_MSG_ERROR, "mhi_init> Failed to spawn threads\n");
+		return MHI_STATUS_ERROR;
+	}
 	if (MHI_STATUS_SUCCESS != mhi_init_timers(*mhi_device)) {
 		mhi_log(MHI_MSG_ERROR, "Failed initializing timers\n");
 		mhi_clean_init_stage(*mhi_device,
 					MHI_INIT_ERROR_STAGE_DEVICE_CTRL);
-		return MHI_STATUS_ERROR;
-	}
-	if (MHI_STATUS_SUCCESS != mhi_spawn_threads(*mhi_device)) {
-		mhi_log(MHI_MSG_ERROR, "mhi_init> Failed to spawn threads\n");
 		return MHI_STATUS_ERROR;
 	}
 	(*mhi_device)->dev_info = dev_info;
@@ -380,8 +381,8 @@ MHI_STATUS mhi_init_state_change_thread_work_queue(mhi_state_work_queue *q)
 	q->q_info.base = q->buf;
 	q->q_info.rp = q->buf;
 	q->q_info.wp = q->buf;
-	q->q_info.len = MHI_WORK_Q_MAX_SIZE * sizeof(mhi_state_work_item);
-	q->q_info.el_size = sizeof(mhi_state_work_item);
+	q->q_info.len = MHI_WORK_Q_MAX_SIZE * sizeof(STATE_TRANSITION);
+	q->q_info.el_size = sizeof(STATE_TRANSITION);
 	q->q_info.overwrite_en = 0;
 	if (NULL == q->q_mutex) {
 		q->q_mutex = kmalloc(sizeof(struct mutex), GFP_KERNEL);
@@ -719,5 +720,10 @@ MHI_STATUS mhi_init_timers(mhi_device_ctxt *mhi_dev_ctxt)
 	mhi_dev_ctxt->inactivity_timeout =
 			ktime_set(0, MHI_M1_ENTRY_DELAY_MS * 1E6L);
 	mhi_dev_ctxt->inactivity_tmr.function = mhi_initiate_M1;
+	mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+		"Starting Inactivity timer\n");
+	hrtimer_start(&mhi_dev_ctxt->inactivity_tmr,
+				mhi_dev_ctxt->inactivity_timeout,
+				HRTIMER_MODE_REL);
 	return MHI_STATUS_SUCCESS;
 }

@@ -10,6 +10,7 @@
  * GNU General Public License for more details.
  */
 
+#include "msm_mhi.h"
 #include "mhi_sys.h"
 #include "mhi.h"
 #include "mhi_hwio.h"
@@ -75,18 +76,7 @@ int mhi_resume(struct pci_dev *pcie_dev)
 	if (r)
 		mhi_log(MHI_MSG_ERROR | MHI_DBG_POWER,
 			"Could not set DEVICE WAKE GPIO HIGH\n");
-	mhi_log(MHI_MSG_INFO | MHI_DBG_POWER, "Entered\n");
-	r = msm_pcie_pm_control(MSM_PCIE_RESUME,
-				pcie_dev->bus->number,
-				pcie_dev,
-				NULL,
-				0);
-	if (r) {
-		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
-				"Failed to resume pcie bus ret 0x%x\n", r);
-		return -EIO;
-	}
-	r = pci_set_power_state(pcie_dev, PCI_D0);
+
 	if (r) {
 		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
 				"Failed to set power state 0x%x\n", r);
@@ -94,9 +84,12 @@ int mhi_resume(struct pci_dev *pcie_dev)
 	}
 	pci_restore_state(pcie_dev);
 
-	if (MHI_STATUS_SUCCESS != mhi_init_state_transition(mhi_dev_ctxt,
-				STATE_TRANSITION_M0))
-		mhi_log(MHI_MSG_CRITICAL, "Failed to transition back to M0\n");
+	if (mhi_dev_ctxt->pending_M3) {
+		mhi_log(MHI_MSG_CRITICAL,
+			"Device did not ACK previous suspend request MHI STATE is 0x%x\n",
+			mhi_dev_ctxt->mhi_state);
+		return -ENETRESET;
+		}
 
 	mhi_initiate_M0(mhi_devices.device_list[0].mhi_ctxt);
 
@@ -128,6 +121,7 @@ enum hrtimer_restart mhi_initiate_M1(struct hrtimer *timer)
 {
 	int ret_val = 0;
 	unsigned long flags;
+	ktime_t curr_time, timer_inc;
 	mhi_device_ctxt *mhi_dev_ctxt = container_of(timer,
 						mhi_device_ctxt,
 						inactivity_tmr);
@@ -135,37 +129,80 @@ enum hrtimer_restart mhi_initiate_M1(struct hrtimer *timer)
 
 	/* We will allow M1 if no data is pending, the current
 	 * state is M0 and no M3 transition is pending */
-	if (0 == atomic_read(&mhi_dev_ctxt->data_pending) &&
-			(MHI_STATE_M0 == mhi_dev_ctxt->mhi_state ||
-			 MHI_STATE_M1 == mhi_dev_ctxt->mhi_state) &&
-			0 == mhi_dev_ctxt->pending_M3) {
+	if ((0 == atomic_read(&mhi_dev_ctxt->data_pending)) &&
+			(MHI_STATE_M1 == mhi_dev_ctxt->mhi_state ||
+			 MHI_STATE_M0 == mhi_dev_ctxt->mhi_state) &&
+			(0 == mhi_dev_ctxt->pending_M3) &&
+			mhi_dev_ctxt->mhi_initialized) {
 		mhi_dev_ctxt->mhi_state = MHI_STATE_M1;
-		ret_val = gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
+		ret_val = gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 0);
+			mhi_log(MHI_MSG_VERBOSE,
+					"Allowing M1.\n");
 		mhi_dev_ctxt->m0_m1++;
 		if (ret_val)
 			mhi_log(MHI_MSG_ERROR | MHI_DBG_POWER,
 				"Could not set DEVICE WAKE GPIO LOW\n");
 	}
 	write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
+	curr_time = ktime_get();
+	timer_inc = ktime_set(0, MHI_M1_ENTRY_DELAY_MS * 1E6L);
+	hrtimer_forward(timer, curr_time, timer_inc);
 	return HRTIMER_RESTART;
 }
 
 int mhi_initiate_M0(mhi_device_ctxt *mhi_dev_ctxt)
 {
 	int ret_val = 0;
+	int r = 0;
 	mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
 			"Initializing state transiton to M0\n");
 
+	r =
+		msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client, 1);
+	if (r)
+		mhi_log(MHI_MSG_CRITICAL,
+			"Could not set bus frequency ret: %d\n",
+			r);
 	mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
 			"Setting WAKE GPIO HIGH.\n");
 	ret_val = gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
 	if (ret_val)
 		mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
 			"Failed to set DEVICE WAKE GPIO ret 0x%d.\n", ret_val);
+	if (mhi_dev_ctxt->mhi_state == MHI_STATE_M2) {
+		r = wait_event_interruptible_timeout(*mhi_dev_ctxt->M0_event,
+		mhi_dev_ctxt->mhi_state != MHI_STATE_M2,
+		msecs_to_jiffies(MHI_MAX_RESUME_TIMEOUT));
+		if (r) {
+			mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
+				"MDM failed to come out of M2.\n");
+			return -ENETRESET;
+		}
+	} else {
 	MHI_REG_WRITE_FIELD(mhi_dev_ctxt->mmio_addr, MHICTRL,
 			MHICTRL_MHISTATE_MASK,
 			MHICTRL_MHISTATE_SHIFT,
 			MHI_STATE_M0);
+	}
+	r = wait_event_interruptible_timeout(*mhi_devices.device_list[0].mhi_ctxt->M0_event,
+		mhi_devices.device_list[0].mhi_ctxt->mhi_state != MHI_STATE_M3,
+		msecs_to_jiffies(MHI_MAX_RESUME_TIMEOUT));
+	switch(r) {
+	case 0:
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+			"MDM failed to resume after 0x%x ms\n",
+			MHI_MAX_RESUME_TIMEOUT);
+		mhi_dev_ctxt->m0_event_timeouts++;
+		break;
+	case -ERESTARTSYS:
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+			"Going Down...\n");
+		break;
+	default:
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+				"M0 event received\n");
+		break;
+	}
 	return 0;
 }
 
@@ -175,17 +212,26 @@ int mhi_initiate_M3(mhi_device_ctxt *mhi_dev_ctxt)
 	u32 i = 0;
 	u32 failed_stop = 1;
 	u32 ret_val = 0;
+	int r = 0;
 
-	mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
-			"Entering...\n");
+	mhi_log(MHI_MSG_INFO | MHI_DBG_POWER, "Entering...\n");
+
+	ret_val =
+		msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client, 0);
+	if (ret_val)
+		mhi_log(MHI_MSG_CRITICAL,
+			"Could not set bus frequency ret: %d\n",
+			ret_val);
 	write_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
 	mhi_dev_ctxt->pending_M3 = 1;
 	gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
 	write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
-	if (mhi_dev_ctxt->mhi_state == MHI_STATE_M2)
-		wait_event_interruptible(*mhi_dev_ctxt->M0_event,
-			MHI_STATE_M0 == mhi_dev_ctxt->mhi_state);
 
+	if (mhi_dev_ctxt->mhi_state == MHI_STATE_M2)
+		r = wait_event_interruptible(*mhi_dev_ctxt->M0_event,
+			MHI_STATE_M0 == mhi_dev_ctxt->mhi_state);
+	if (r)
+		return r;
 	while (i < MHI_MAX_SUSPEND_RETRIES) {
 		mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
 			"Waiting for clients to stop, clients still active %d\n",
@@ -217,6 +263,13 @@ int mhi_initiate_M3(mhi_device_ctxt *mhi_dev_ctxt)
 		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
 			"MDM failed to suspend after %d ms\n",
 			MHI_MAX_SUSPEND_TIMEOUT);
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+			"STT RP %p WP %p BASE %p Len %ld\n",
+			mhi_dev_ctxt->state_change_work_item_list.q_info.rp,
+			mhi_dev_ctxt->state_change_work_item_list.q_info.wp,
+			mhi_dev_ctxt->state_change_work_item_list.q_info.base,
+		mhi_dev_ctxt->state_change_work_item_list.q_info.len);
+		mhi_dev_ctxt->m3_event_timeouts++;
 		ret_val = -ETIMEDOUT;
 		break;
 	case -ERESTARTSYS:
@@ -284,6 +337,7 @@ ssize_t sysfs_get_mhi_state(struct device *dev, struct device_attribute *attr,
 ssize_t sysfs_init_M0(struct device *dev, struct device_attribute *attr,
 			const char *buf, size_t count)
 {
+
 	int r = 0;
 	r = msm_pcie_pm_control(MSM_PCIE_RESUME,
 			mhi_devices.device_list[0].pcie_device->bus->number,
@@ -312,24 +366,7 @@ ssize_t sysfs_init_M0(struct device *dev, struct device_attribute *attr,
 	mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
 			"Current mhi_state = 0x%x\n",
 			mhi_devices.device_list[0].mhi_ctxt->mhi_state);
-	r = wait_event_interruptible_timeout(*mhi_devices.device_list[0].mhi_ctxt->M0_event,
-		mhi_devices.device_list[0].mhi_ctxt->mhi_state != MHI_STATE_M3,
-		msecs_to_jiffies(MHI_MAX_RESUME_TIMEOUT));
-	switch(r) {
-	case 0:
-		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
-			"MDM failed to resume after 0x%x ms\n",
-			MHI_MAX_RESUME_TIMEOUT);
-		break;
-	case -ERESTARTSYS:
-		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
-			"Going Down...\n");
-		break;
-	default:
-		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
-				"M0 event received\n");
-		break;
-	}
+
 	return count;
 }
 
