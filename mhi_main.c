@@ -257,13 +257,13 @@ MHI_STATUS mhi_add_elements_to_event_rings(mhi_device_ctxt *mhi_dev_ctxt,
 MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 		uintptr_t buf, size_t buf_len, u32 chain, u32 eob)
 {
-	u64 db_value = 0;
-	mhi_xfer_pkt *pkt_loc = NULL;
-	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
-	MHI_CLIENT_CHANNEL chan = 0;
-	mhi_device_ctxt *mhi_dev_ctxt = NULL;
-	unsigned long flags = 0;
-	uintptr_t trb_index = 0;
+	u64 db_value;
+	mhi_xfer_pkt *pkt_loc;
+	MHI_STATUS ret_val;
+	MHI_CLIENT_CHANNEL chan;
+	mhi_device_ctxt *mhi_dev_ctxt;
+	unsigned long flags;
+	uintptr_t trb_index;
 
 	if (NULL == client_handle || !VALID_CHAN_NR(client_handle->chan) ||
 		0 == buf || chain >= MHI_TRE_CHAIN_LIMIT || 0 == buf_len) {
@@ -287,7 +287,7 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	/* Add the TRB to the correct transfer ring */
 	ret_val = ctxt_add_element(&mhi_dev_ctxt->mhi_local_chan_ctxt[chan],
 				(void *)&pkt_loc);
-	if (MHI_STATUS_SUCCESS != ret_val) {
+	if (unlikely(MHI_STATUS_SUCCESS != ret_val)) {
 		mhi_log(MHI_MSG_INFO, "Failed to insert trb in xfer ring\n");
 		goto error;
 	}
@@ -297,7 +297,7 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	get_element_index(&mhi_dev_ctxt->mhi_local_chan_ctxt[chan],
 				pkt_loc, &trb_index);
 
-	if (0 != client_handle->intmod_t)
+	if (likely(0 != client_handle->intmod_t))
 		MHI_TRB_SET_INFO(TX_TRB_BEI, pkt_loc, 1);
 	else
 		MHI_TRB_SET_INFO(TX_TRB_BEI, pkt_loc, 0);
@@ -308,8 +308,8 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	MHI_TRB_SET_INFO(TX_TRB_TYPE, pkt_loc, MHI_PKT_TYPE_TRANSFER);
 	MHI_TX_TRB_SET_LEN(TX_TRB_LEN, pkt_loc, buf_len);
 
-	if (MHI_STATE_M0 == mhi_dev_ctxt->mhi_state ||
-		MHI_STATE_M1 == mhi_dev_ctxt->mhi_state) {
+	if (likely(MHI_STATE_M0 == mhi_dev_ctxt->mhi_state ||
+		MHI_STATE_M1 == mhi_dev_ctxt->mhi_state)) {
 		spin_lock_irqsave(&mhi_dev_ctxt->db_write_lock[chan], flags);
 		mhi_dev_ctxt->mhi_chan_db_order[chan]++;
 		db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
@@ -463,29 +463,25 @@ error_general:
 MHI_STATUS parse_xfer_event(mhi_device_ctxt *ctxt, mhi_event_pkt *event)
 {
 	mhi_device_ctxt *mhi_dev_ctxt = (mhi_device_ctxt *)ctxt;
-	mhi_result *result = NULL;
+	mhi_result *result;
 	u32 chan = MHI_MAX_CHANNELS;
-	u16 xfer_len = 0;
-	uintptr_t phy_ev_trb_loc = 0;
-	mhi_xfer_pkt *local_ev_trb_loc = NULL;
-	mhi_client_handle *client_handle = NULL;
-	mhi_xfer_pkt *local_trb_loc = NULL;
-	mhi_chan_ctxt *chan_ctxt = NULL;
-	u32 nr_trb_to_parse = 0;
-	u32 i = 0;
+	u16 xfer_len;
+	uintptr_t phy_ev_trb_loc;
+	mhi_xfer_pkt *local_ev_trb_loc;
+	mhi_client_handle *client_handle;
+	mhi_xfer_pkt *local_trb_loc;
+	mhi_chan_ctxt *chan_ctxt;
+	u32 nr_trb_to_parse;
+	u32 i;
 
-	if (NULL == mhi_dev_ctxt) {
-		mhi_log(MHI_MSG_ERROR, "Got bad context, quitting\n");
-		return MHI_STATUS_ERROR;
-	}
 	switch (MHI_EV_READ_CODE(EV_TRB_CODE, event)) {
 	case MHI_EVENT_CC_SUCCESS:
 		mhi_log(MHI_MSG_VERBOSE, "IEOB condition detected\n");
 	case MHI_EVENT_CC_EOT:
 	{
-		void *trb_data_loc = NULL;
-		u32 ieot_flag = 0;
-		MHI_STATUS ret_val = 0;
+		void *trb_data_loc;
+		u32 ieot_flag;
+		MHI_STATUS ret_val;
 		mhi_ring *local_chan_ctxt;
 
 		chan = MHI_EV_READ_CHID(EV_CHID, event);
@@ -493,7 +489,7 @@ MHI_STATUS parse_xfer_event(mhi_device_ctxt *ctxt, mhi_event_pkt *event)
 			&mhi_dev_ctxt->mhi_local_chan_ctxt[chan];
 		phy_ev_trb_loc = MHI_EV_READ_PTR(EV_PTR, event);
 
-		if (!VALID_CHAN_NR(chan)) {
+		if (unlikely(!VALID_CHAN_NR(chan))) {
 			mhi_log(MHI_MSG_ERROR, "Bad ring id.\n");
 			break;
 		}
@@ -501,7 +497,7 @@ MHI_STATUS parse_xfer_event(mhi_device_ctxt *ctxt, mhi_event_pkt *event)
 		ret_val = validate_xfer_el_addr(chan_ctxt,
 						phy_ev_trb_loc);
 
-		if (MHI_STATUS_SUCCESS != ret_val) {
+		if (unlikely(MHI_STATUS_SUCCESS != ret_val)) {
 			mhi_log(MHI_MSG_ERROR, "Bad event trb ptr.\n");
 			break;
 		}
@@ -517,7 +513,7 @@ MHI_STATUS parse_xfer_event(mhi_device_ctxt *ctxt, mhi_event_pkt *event)
 				      local_trb_loc,
 				      local_ev_trb_loc,
 				      &nr_trb_to_parse);
-		if (MHI_STATUS_SUCCESS != ret_val) {
+		if (unlikely(MHI_STATUS_SUCCESS != ret_val)) {
 			mhi_log(MHI_MSG_CRITICAL,
 				"Failed to get nr available trbs ret: %d.\n",
 				ret_val);
@@ -906,15 +902,15 @@ MHI_STATUS validate_ring_el_addr(mhi_ring *ring, uintptr_t addr)
 MHI_STATUS parse_inbound(mhi_device_ctxt *mhi_dev_ctxt, u32 chan,
 			mhi_xfer_pkt *local_ev_trb_loc, u16 xfer_len)
 {
-	mhi_client_handle *client_handle = NULL;
-	mhi_ring *local_chan_ctxt = NULL;
-	mhi_result *result = NULL;
+	mhi_client_handle *client_handle;
+	mhi_ring *local_chan_ctxt;
+	mhi_result *result;
 
 	client_handle = mhi_dev_ctxt->client_handle_list[chan];
 	local_chan_ctxt = &mhi_dev_ctxt->mhi_local_chan_ctxt[chan];
 
-	if (mhi_dev_ctxt->mhi_local_chan_ctxt[chan].rp ==
-	    mhi_dev_ctxt->mhi_local_chan_ctxt[chan].wp) {
+	if (unlikely(mhi_dev_ctxt->mhi_local_chan_ctxt[chan].rp ==
+	    mhi_dev_ctxt->mhi_local_chan_ctxt[chan].wp)) {
 		mhi_dev_ctxt->mhi_chan_cntr[chan].empty_ring_removal++;
 		mhi_wait_for_mdm(mhi_dev_ctxt);
 		return mhi_send_cmd(mhi_dev_ctxt,
@@ -926,7 +922,7 @@ MHI_STATUS parse_inbound(mhi_device_ctxt *mhi_dev_ctxt, u32 chan,
 		result = &mhi_dev_ctxt->client_handle_list[chan]->result;
 
 	/* If a client is registered */
-	if (IS_SOFTWARE_CHANNEL(chan)) {
+	if (unlikely(IS_SOFTWARE_CHANNEL(chan))) {
 		MHI_TX_TRB_SET_LEN(TX_TRB_LEN,
 		local_ev_trb_loc,
 		xfer_len);
@@ -937,7 +933,7 @@ MHI_STATUS parse_inbound(mhi_device_ctxt *mhi_dev_ctxt, u32 chan,
 	} else  {
 		/* IN Hardware channel with no client
 		 * registered, we are done with this TRB*/
-		if (NULL != client_handle) {
+		if (likely(NULL != client_handle)) {
 			ctxt_del_element(local_chan_ctxt, NULL);
 		/* A client is not registred for this IN channel */
 		} else  {/* Hardware Channel, no client registerered,

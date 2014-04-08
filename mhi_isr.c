@@ -36,16 +36,15 @@ irqreturn_t irq_cb(int irq_number, void *dev_id)
 		break;
 	case 2:
 	{
-		mhi_log(MHI_MSG_VERBOSE, "NAPI interrupt received\n");
 		client_index =
 			mhi_dev_ctxt->alloced_ev_rings[TERTIARY_EVENT_RING];
 		client_handle = mhi_dev_ctxt->client_handle_list[client_index];
 		client_info = &client_handle->client_info;
 
-		if (NULL != client_handle) {
+		if (likely(NULL != client_handle)) {
 			(client_handle->result).user_data =
 					client_handle->user_data;
-			if (NULL != &client_info->mhi_xfer_cb)
+			if (likely(NULL != &client_info->mhi_xfer_cb))
 				client_info->mhi_xfer_cb(&client_handle->result);
 		}
 		break;
@@ -112,8 +111,8 @@ MHI_STATUS mhi_process_event_ring(mhi_device_ctxt *mhi_dev_ctxt,
 	local_rp = (mhi_event_pkt *)local_ev_ctxt->rp;
 
 
-	if (MHI_STATUS_SUCCESS != validate_ev_el_addr(local_ev_ctxt,
-				(uintptr_t)device_rp))
+	if (unlikely(MHI_STATUS_SUCCESS != validate_ev_el_addr(local_ev_ctxt,
+				(uintptr_t)device_rp)))
 		mhi_log(MHI_MSG_ERROR,
 				"Failed to validate event ring element 0x%p\n",
 				device_rp);
@@ -122,10 +121,10 @@ MHI_STATUS mhi_process_event_ring(mhi_device_ctxt *mhi_dev_ctxt,
 	while ((local_rp != device_rp) && (event_quota > 0) &&
 			(device_rp != NULL) && (local_rp != NULL)) {
 		event_to_process = *local_rp;
-		if (MHI_STATUS_SUCCESS != recycle_trb_and_ring(mhi_dev_ctxt,
+		if (unlikely(MHI_STATUS_SUCCESS != recycle_trb_and_ring(mhi_dev_ctxt,
 						local_ev_ctxt,
 						MHI_RING_TYPE_EVENT_RING,
-						ev_index))
+						ev_index)))
 			mhi_log(MHI_MSG_ERROR, "Failed to recycle ev pkt\n");
 		switch (MHI_TRB_READ_INFO(EV_TRB_TYPE, (&event_to_process))) {
 		case MHI_PKT_TYPE_CMD_COMPLETION_EVENT:
@@ -203,19 +202,11 @@ mhi_result *mhi_poll(mhi_client_handle *client_handle)
 
 void mhi_mask_irq(mhi_client_handle *client_handle)
 {
-	mhi_log(MHI_MSG_VERBOSE, "Masking MSI 0x%x\n",
-		client_handle->msi_vec);
-	if (client_handle == NULL)
-		return;
 	disable_irq_nosync(MSI_TO_IRQ(client_handle->mhi_dev_ctxt,
 					client_handle->msi_vec));
 }
 void mhi_unmask_irq(mhi_client_handle *client_handle)
 {
-	mhi_log(MHI_MSG_VERBOSE, "Unmasking MSI 0x%x\n",
-			client_handle->msi_vec);
-	if  (client_handle == NULL)
-		return;
 	enable_irq(MSI_TO_IRQ(client_handle->mhi_dev_ctxt,
 			client_handle->msi_vec));
 }
