@@ -113,6 +113,39 @@ int mhi_startup_thread(void *ctxt)
 	if (MHI_STATUS_SUCCESS != ret_val)
 		goto msi_config_err;
 
+	mhi_pcie_dev->mhi_ctxt->usecase[0].num_paths = 1;
+	mhi_pcie_dev->mhi_ctxt->usecase[0].vectors =
+		&mhi_pcie_dev->mhi_ctxt->bus_vectors[0];
+	mhi_pcie_dev->mhi_ctxt->usecase[1].num_paths = 1;
+	mhi_pcie_dev->mhi_ctxt->usecase[1].vectors =
+		&mhi_pcie_dev->mhi_ctxt->bus_vectors[1];
+	mhi_pcie_dev->mhi_ctxt->bus_vectors[0].src = 0x64;
+	mhi_pcie_dev->mhi_ctxt->bus_vectors[0].dst = 0x200;
+	mhi_pcie_dev->mhi_ctxt->bus_vectors[0].ab = 0x0;
+	mhi_pcie_dev->mhi_ctxt->bus_vectors[0].ib = 0x0;
+	mhi_pcie_dev->mhi_ctxt->bus_vectors[1].src = 0x64;
+	mhi_pcie_dev->mhi_ctxt->bus_vectors[1].dst = 0x200;
+	mhi_pcie_dev->mhi_ctxt->bus_vectors[1].ab = 625000000;
+	mhi_pcie_dev->mhi_ctxt->bus_vectors[1].ib = 625000000;
+	mhi_pcie_dev->mhi_ctxt->bus_scale_table.name = "mhi";
+	mhi_pcie_dev->mhi_ctxt->bus_scale_table.num_usecases = 2;
+	mhi_pcie_dev->mhi_ctxt->bus_scale_table.active_only = 0;
+	mhi_pcie_dev->mhi_ctxt->bus_scale_table.usecase =
+					mhi_pcie_dev->mhi_ctxt->usecase;
+	mhi_pcie_dev->mhi_ctxt->bus_client =
+		msm_bus_scale_register_client(&mhi_pcie_dev->mhi_ctxt->bus_scale_table);
+	if (!mhi_pcie_dev->mhi_ctxt->bus_client) {
+		mhi_log(MHI_MSG_CRITICAL,
+			"Could not register for bus control ret: %d.\n",
+			mhi_pcie_dev->mhi_ctxt->bus_client);
+	} else {
+		ret_val =
+			msm_bus_scale_client_update_request(mhi_pcie_dev->mhi_ctxt->bus_client, 1);
+		if (ret_val)
+			mhi_log(MHI_MSG_CRITICAL,
+				"Could not set bus frequency ret: %d\n",
+				ret_val);
+	}
 
 	device_disable_async_suspend(&pcie_device->dev);
 	ret_val = pci_enable_msi_block(pcie_device, MAX_NR_MSI + 1);

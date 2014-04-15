@@ -12,7 +12,7 @@
 
 #ifndef _H_OSAL_
 #define _H_OSAL_
-#include "mhi.h"
+
 #include <linux/mutex.h> /* mutex_t */
 #include <linux/miscdevice.h>
 #include <linux/spinlock.h>
@@ -43,6 +43,10 @@
 #include <linux/debugfs.h>
 #include <linux/uaccess.h>
 #include <linux/platform_device.h>
+#include <linux/sched/rt.h>
+#include <linux/msm-bus.h>
+#include <linux/msm-bus-board.h>
+#include "mhi.h"
 
 extern MHI_DEBUG_LEVEL mhi_msg_lvl;
 extern MHI_DEBUG_CLASS mhi_msg_class;
