@@ -31,7 +31,7 @@
 #define MHI_DEFAULT_MRU        2000
  /* TODO: This will go to the MHI Core HDR I guess */
 #define MHI_MAX_MRU            0xFFFF
-#define MHI_NAPI_WEIGHT_VALUE  64
+#define MHI_NAPI_WEIGHT_VALUE  12
 #define MHI_RX_HEADROOM        64
 #define WATCHDOG_TIMEOUT       (30 * HZ)
 #define MHI_RMNET_DEVICE_COUNT 1 /* TODO: Will be a compile-time definition */
@@ -175,17 +175,18 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 	struct rmnet_mhi_private *rmnet_mhi_ptr = netdev_priv(dev);
 	MHI_STATUS res = MHI_STATUS_reserved;
 	bool should_reschedule = true;
+	struct sk_buff *skb;
+	dma_addr_t dma_addr;
+	uintptr_t *cb_ptr;
 
 	/* Reset the watchdog? */
 
 	while (received_packets < budget) {
 		mhi_result *result =
 		      mhi_poll(rmnet_mhi_ptr->rx_client_handle);
-		struct sk_buff *skb = 0;
-		dma_addr_t dma_addr;
-		uintptr_t *cb_ptr = 0;
+
 		/* Failure from MHI core */
-		if (MHI_STATUS_SUCCESS != result->transaction_status) {
+		if (unlikely (MHI_STATUS_SUCCESS != result->transaction_status)) {
 			/* TODO: Handle error */
 			pr_err("%s: mhi_poll failed, error is %d",
 			       __func__, result->transaction_status);
@@ -193,7 +194,7 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 		}
 
 		/* Nothing more to read, or out of buffers in MHI layer */
-		if (0 == result->payload_buf || 0 == result->bytes_xferd) {
+		if (unlikely(0 == result->payload_buf || 0 == result->bytes_xferd)) {
 			should_reschedule = false;
 			break;
 		}
@@ -206,7 +207,7 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 
 		/* Take the first one */
 		skb = skb_dequeue(&(rmnet_mhi_ptr->rx_buffers));
-		if (0 == skb) {
+		if (unlikely(0 == skb)) {
 			/* TODO: This shouldn't happen, we had a guard above */
 			pr_err("%s: No RX buffers to match", __func__);
 			break;
@@ -216,7 +217,7 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 		dma_addr = (dma_addr_t)(uintptr_t)(*cb_ptr);
 
 		/* Sanity check, ensuring that this is actually the buffer */
-		if ((uintptr_t)dma_addr != (uintptr_t)result->payload_buf) {
+		if (unlikely((uintptr_t)dma_addr != (uintptr_t)result->payload_buf)) {
 			/* TODO: Handle error */
 			pr_err("%s: Unexpected physical address mismatch, expected 0x%lx, got 0x%lx",
 			       __func__, (uintptr_t)dma_addr, (uintptr_t)result->payload_buf);
@@ -242,7 +243,7 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 		 */
 		skb = alloc_skb(rmnet_mhi_ptr->mru, GFP_ATOMIC);
 
-		if (0 == skb) {
+		if (unlikely(0 == skb)) {
 			/* TODO: Handle error */
 			pr_err("%s: Can't allocate a new RX buffer for MHI",
 			       __func__);
@@ -257,7 +258,7 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 					  DMA_FROM_DEVICE);
 		*cb_ptr = (uintptr_t)dma_addr;
 
-		if (dma_mapping_error(&(dev->dev), dma_addr)) {
+		if (unlikely(dma_mapping_error(&(dev->dev), dma_addr))) {
 			pr_err("%s: DMA mapping error in polling function",
 			       __func__);
 			/* TODO: Handle error */
@@ -267,9 +268,9 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 
 		/* TODO: What do we do in such a scenario in
 			which we can't allocate a RX buffer? */
-		if (DMA_RANGE_CHECK(dma_addr,
+		if (unlikely(DMA_RANGE_CHECK(dma_addr,
 				    rmnet_mhi_ptr->mru,
-				    MHI_DMA_MASK)) {
+				    MHI_DMA_MASK))) {
 			pr_err("%s: RX buffer is out of MHI DMA address range",
 			       __func__);
 			dma_unmap_single(&(dev->dev), dma_addr, skb->len,
@@ -282,7 +283,7 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 			rmnet_mhi_ptr->rx_client_handle,
 			(uintptr_t)dma_addr, rmnet_mhi_ptr->mru, 0, 0);
 
-		if (MHI_STATUS_SUCCESS != res) {
+		if (unlikely(MHI_STATUS_SUCCESS != res)) {
 			/* TODO: Handle error */
 			pr_err("%s: mhi_queue_xfer failed, error %d",
 			       __func__, res);
