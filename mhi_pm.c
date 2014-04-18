@@ -45,8 +45,7 @@ int mhi_suspend(struct pci_dev *pcie_dev, pm_message_t state)
 	if (NULL == mhi_dev_ctxt)
 		return 0;
 
-	if (!mhi_dev_ctxt->link_up)
-	{
+	if (!mhi_dev_ctxt->link_up) {
 		mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
 			"Link is not up, nothing to do.\n");
 		return 0;
@@ -60,6 +59,7 @@ int mhi_suspend(struct pci_dev *pcie_dev, pm_message_t state)
 		return 0;
 	}
 
+	if (mhi_dev_ctxt->link_up) {
 	ret_val = pci_save_state(pcie_dev);
 	if (ret_val) {
 		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
@@ -74,6 +74,10 @@ int mhi_suspend(struct pci_dev *pcie_dev, pm_message_t state)
 			"Failed to put device in D3 hot ret %d\n", ret_val);
 		return MHI_STATUS_ERROR;
 		}
+		mhi_dev_ctxt->link_up = 0;
+	} else {
+		gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 0);
+	}
 	return 0;
 }
 
@@ -84,7 +88,7 @@ int mhi_resume(struct pci_dev *pcie_dev)
 			*(mhi_device_ctxt **)((pcie_dev->dev).platform_data);
 	if (NULL == mhi_dev_ctxt)
 		return 0;
-	r = gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
+
 	if (r)
 		mhi_log(MHI_MSG_ERROR | MHI_DBG_POWER,
 			"Could not set DEVICE WAKE GPIO HIGH\n");
