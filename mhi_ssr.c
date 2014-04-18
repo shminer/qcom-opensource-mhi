@@ -113,13 +113,14 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify)
 			"Informing clients of MHI that link is down\n");
 		write_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
 		mhi_dev_ctxt->mhi_state = MHI_STATE_RESET;
-		ret_val = gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
+		ret_val = gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 0);
 		write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 		//mhi_notify_clients(mhi_dev_ctxt, MHI_CB_MHI_DISABLED);
 		mhi_dev_ctxt->mhi_initialized = 0;
 		mhi_pcie_dev->link_down_cntr++;
 		break;
 	case MSM_PCIE_EVENT_LINKUP:
+		ret_val = gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
 		if (0 == mhi_pcie_dev->link_up_cntr) {
 		mhi_log(MHI_MSG_INFO,
 			"Initializing MHI for the first time\n");
