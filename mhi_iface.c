@@ -207,7 +207,6 @@ int mhi_startup_thread(void *ctxt)
 		}
 	}
 	mhi_pcie_dev->core.irq_base = pcie_device->irq;
-	mhi_pcie_dev->mhi_ctxt->dev_props.irq_base = pcie_device->irq;
 	mhi_log(MHI_MSG_VERBOSE,
 		"Setting IRQ Base to 0x%x\n", mhi_pcie_dev->core.irq_base);
 	mhi_pcie_dev->core.max_nr_msis = MAX_NR_MSI;
@@ -220,10 +219,6 @@ int mhi_startup_thread(void *ctxt)
 			msleep(500);
 			break;
 		case 0:
-			mhi_pcie_dev->mhi_ctxt->device_wake = ret_val;
-			mhi_log(MHI_MSG_VERBOSE,
-				"Got DEVICE_WAKE GPIO 0x%x from device tree\n",
-				mhi_pcie_dev->mhi_ctxt->device_wake);
 			break;
 		default:
 			mhi_log(MHI_MSG_CRITICAL,
@@ -232,7 +227,7 @@ int mhi_startup_thread(void *ctxt)
 			break;
 	}
 		retry_count++;
-	}while ((retry_count < 300) && (ret_val == -EPROBE_DEFER));
+	} while ((retry_count < 30) && (ret_val == -EPROBE_DEFER));
 	ret_val = mhi_init_pm_sysfs(&pcie_device->dev);
 	if (0 != ret_val) {
 		mhi_log(MHI_MSG_ERROR, "Failed to setup sysfs.\n");
@@ -263,7 +258,7 @@ mhi_state_transition_error:
 				MHI_INIT_ERROR_STAGE_UNWIND_ALL))
 		mhi_log(MHI_MSG_ERROR, "Could not clean up context\n");
 sysfs_config_err:
-	gpio_free(MHI_DEVICE_WAKE_GPIO);
+	gpio_free(mhi_pcie_dev->core.device_wake_gpio);
 msi_config_err:
 	pci_disable_msi(pcie_device);
 	pci_disable_device(pcie_device);
