@@ -102,14 +102,14 @@ int mhi_init_gpios(mhi_pcie_dev_info *mhi_pcie_dev)
 		return -EIO;
 		break;
 	default:
-		mhi_pcie_dev->mhi_ctxt->device_wake = ret_val;
+		mhi_pcie_dev->core.device_wake_gpio = ret_val;
 		mhi_log(MHI_MSG_CRITICAL,
 			"Got DEVICE_WAKE GPIO nr 0x%x from device tree\n",
-			mhi_pcie_dev->mhi_ctxt->device_wake);
+			mhi_pcie_dev->core.device_wake_gpio);
 		break;
 	}
 
-	ret_val = gpio_request(mhi_pcie_dev->mhi_ctxt->device_wake, "mhi");
+	ret_val = gpio_request(mhi_pcie_dev->core.device_wake_gpio, "mhi");
 	if (ret_val) {
 		mhi_log(MHI_MSG_VERBOSE,
 			"Could not obtain device WAKE gpio\n");
@@ -117,12 +117,12 @@ int mhi_init_gpios(mhi_pcie_dev_info *mhi_pcie_dev)
 	mhi_log(MHI_MSG_VERBOSE,
 		"Attempting to set output direction to DEVICE_WAKE gpio\n");
 	/* This GPIO must never sleep as it can be set in timer ctxt */
-	gpio_set_value_cansleep(mhi_pcie_dev->mhi_ctxt->device_wake, 0);
+	gpio_set_value_cansleep(mhi_pcie_dev->core.device_wake_gpio, 0);
 	if (ret_val)
 		mhi_log(MHI_MSG_VERBOSE,
 		"Could not set GPIO to not sleep!\n");
 
-	ret_val = gpio_direction_output(mhi_pcie_dev->mhi_ctxt->device_wake, 1);
+	ret_val = gpio_direction_output(mhi_pcie_dev->core.device_wake_gpio, 1);
 
 	if (ret_val) {
 		mhi_log(MHI_MSG_VERBOSE,
@@ -132,7 +132,7 @@ int mhi_init_gpios(mhi_pcie_dev_info *mhi_pcie_dev)
 	return 0;
 
 mhi_gpio_dir_err:
-	gpio_free(mhi_pcie_dev->mhi_ctxt->device_wake);
+	gpio_free(mhi_pcie_dev->core.device_wake_gpio);
 	return -EIO;
 }
 MHI_STATUS mhi_open_channel(mhi_client_handle **client_handle,
@@ -349,7 +349,7 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	atomic_inc(&mhi_dev_ctxt->data_pending);
 	mhi_dev_ctxt->m1_m0++;
 	if (mhi_dev_ctxt->link_up)
-	gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
+		mhi_assert_device_wake(mhi_dev_ctxt);
 	read_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 
 
@@ -426,7 +426,7 @@ MHI_STATUS mhi_send_cmd(mhi_device_ctxt *mhi_dev_ctxt,
 			"Invalid channel id, received id: 0x%x", chan);
 		goto error_general;
 	}
-	gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
+	mhi_assert_device_wake(mhi_dev_ctxt);
 	/*If there is a cmd pending a device confirmation, do not send anymore
 	  for this channel */
 	if (MHI_CMD_PENDING == mhi_dev_ctxt->mhi_chan_pend_cmd_ack[chan])
@@ -879,8 +879,6 @@ MHI_STATUS start_chan_cmd(mhi_device_ctxt *mhi_dev_ctxt, mhi_cmd_pkt *cmd_pkt)
 	mhi_log(MHI_MSG_INFO, "Processed cmd channel start\n");
 	return MHI_STATUS_SUCCESS;
 }
-void assert_device_wake()
-{}
 
 void mhi_poll_inbound(mhi_client_handle *client_handle,
 			uintptr_t *buf, ssize_t *buf_size)
@@ -936,7 +934,7 @@ MHI_STATUS mhi_client_recycle_trb(mhi_client_handle *client_handle)
 					(uintptr_t)local_ctxt->wp);
 	read_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
 	atomic_inc(&mhi_dev_ctxt->data_pending);
-	gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
+	mhi_assert_device_wake(mhi_dev_ctxt);
 	read_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 	if (MHI_STATE_M0 == mhi_dev_ctxt->mhi_state ||
 	    MHI_STATE_M1 == mhi_dev_ctxt->mhi_state)
@@ -1110,4 +1108,18 @@ int mhi_get_max_buffers(mhi_client_handle *client_handle)
 int mhi_get_epid(mhi_client_handle *client_handle)
 {
 	return MHI_EPID;
+}
+int mhi_assert_device_wake(mhi_device_ctxt *mhi_dev_ctxt)
+{
+	mhi_log(MHI_MSG_VERBOSE, "GPIO %d\n",
+			mhi_dev_ctxt->dev_props->device_wake_gpio);
+	gpio_direction_output(mhi_dev_ctxt->dev_props->device_wake_gpio, 1);
+	return 0;
+}
+int mhi_deassert_device_wake(mhi_device_ctxt *mhi_dev_ctxt)
+{
+	mhi_log(MHI_MSG_VERBOSE, "GPIO %d\n",
+			mhi_dev_ctxt->dev_props->device_wake_gpio);
+	gpio_direction_output(mhi_dev_ctxt->dev_props->device_wake_gpio, 0);
+	return 0;
 }

@@ -58,7 +58,7 @@ MHI_STATUS mhi_init_mmio(mhi_device_ctxt *mhi_dev_ctxt)
 	MHI_STATUS ret_val;
 
 	mhi_log(MHI_MSG_INFO, "~~~ Initializing MMIO ~~~\n");
-	pcie_bar0_addr = mhi_dev_ctxt->dev_props.bar0_base;
+	pcie_bar0_addr = mhi_dev_ctxt->dev_props->bar0_base;
 
 	mhi_dev_ctxt->mmio_addr = pcie_bar0_addr;
 	mhi_log(MHI_MSG_INFO, "Bar 0 address is at: 0x%lX\n",
@@ -72,13 +72,13 @@ MHI_STATUS mhi_init_mmio(mhi_device_ctxt *mhi_dev_ctxt)
 	}
 
 	mhi_log(MHI_MSG_INFO, "Testing MHI Ver\n");
-	mhi_dev_ctxt->dev_props.mhi_ver = pcie_read(mhi_dev_ctxt->mmio_addr,
+	mhi_dev_ctxt->dev_props->mhi_ver = pcie_read(mhi_dev_ctxt->mmio_addr,
 							MHIVER);
-	if (MHI_VERSION != mhi_dev_ctxt->dev_props.mhi_ver) {
+	if (MHI_VERSION != mhi_dev_ctxt->dev_props->mhi_ver) {
 		mhi_log(MHI_MSG_CRITICAL, "Bad MMIO version, 0x%x\n",
-					mhi_dev_ctxt->dev_props.mhi_ver);
+					mhi_dev_ctxt->dev_props->mhi_ver);
 
-		if (0xFFFFffff == mhi_dev_ctxt->dev_props.mhi_ver)
+		if (0xFFFFffff == mhi_dev_ctxt->dev_props->mhi_ver)
 			ret_val = mhi_wait_for_mdm(mhi_dev_ctxt);
 		if (ret_val)
 			return MHI_STATUS_ERROR;
