@@ -13,15 +13,12 @@
 #include "mhi_sys.h"
 MHI_DEBUG_LEVEL mhi_msg_lvl = MHI_MSG_CRITICAL;
 MHI_DEBUG_CLASS mhi_msg_class = MHI_DBG_DATA | MHI_DBG_POWER;
-u32 mhi_performance_mode = 0;
 
 module_param(mhi_msg_lvl , uint, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(mhi_msg_lvl, "dbg lvl");
 
 module_param(mhi_msg_class , uint, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(mhi_msg_class, "dbg class");
-module_param(mhi_performance_mode , uint, S_IRUGO | S_IWUSR);
-MODULE_PARM_DESC(mhi_performance_mode, "dbg lvl");
 
 static ssize_t mhi_dbgfs_chan_read(struct file *fp, char __user *buf,
 				size_t count, loff_t *offp);

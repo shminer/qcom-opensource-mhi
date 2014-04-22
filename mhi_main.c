@@ -80,10 +80,36 @@ mhi_pcie_read_ep_config_err:
 int mhi_init_gpios(mhi_pcie_dev_info *mhi_pcie_dev)
 {
 	int ret_val = 0;
+	struct device *dev = &mhi_pcie_dev->pcie_device->dev;
+	struct device_node *np;
+	np = dev->of_node;
 	mhi_log(MHI_MSG_VERBOSE,
 			"Attempting to grab DEVICE_WAKE gpio\n");
+	if (!of_find_property(np, "mhi-device-wake-gpio", NULL))
+		mhi_log(MHI_MSG_CRITICAL,
+			"Could not find device wake gpio prop, in dt.\n");
+	else
+		mhi_log(MHI_MSG_VERBOSE, "Found gpio as a property in DT\n");
+	ret_val = of_get_named_gpio(np, "mhi-device-wake-gpio", 0);
+	switch (ret_val) {
+	case -EPROBE_DEFER:
+		mhi_log(MHI_MSG_VERBOSE, "DT is not ready\n");
+		return ret_val;
+		break;
+	case 0:
+		mhi_log(MHI_MSG_CRITICAL,
+			"Could not get gpio from device tree!\n");
+		return -EIO;
+		break;
+	default:
+		mhi_pcie_dev->mhi_ctxt->device_wake = ret_val;
+		mhi_log(MHI_MSG_CRITICAL,
+			"Got DEVICE_WAKE GPIO nr 0x%x from device tree\n",
+			mhi_pcie_dev->mhi_ctxt->device_wake);
+		break;
+	}
 
-	ret_val = gpio_request(MHI_DEVICE_WAKE_GPIO, "mhi");
+	ret_val = gpio_request(mhi_pcie_dev->mhi_ctxt->device_wake, "mhi");
 	if (ret_val) {
 		mhi_log(MHI_MSG_VERBOSE,
 			"Could not obtain device WAKE gpio\n");
@@ -91,12 +117,12 @@ int mhi_init_gpios(mhi_pcie_dev_info *mhi_pcie_dev)
 	mhi_log(MHI_MSG_VERBOSE,
 		"Attempting to set output direction to DEVICE_WAKE gpio\n");
 	/* This GPIO must never sleep as it can be set in timer ctxt */
-	gpio_set_value_cansleep(MHI_DEVICE_WAKE_GPIO, 0);
+	gpio_set_value_cansleep(mhi_pcie_dev->mhi_ctxt->device_wake, 0);
 	if (ret_val)
 		mhi_log(MHI_MSG_VERBOSE,
 		"Could not set GPIO to not sleep!\n");
 
-	ret_val = gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
+	ret_val = gpio_direction_output(mhi_pcie_dev->mhi_ctxt->device_wake, 1);
 
 	if (ret_val) {
 		mhi_log(MHI_MSG_VERBOSE,
@@ -106,7 +132,7 @@ int mhi_init_gpios(mhi_pcie_dev_info *mhi_pcie_dev)
 	return 0;
 
 mhi_gpio_dir_err:
-	gpio_free(MHI_DEVICE_WAKE_GPIO);
+	gpio_free(mhi_pcie_dev->mhi_ctxt->device_wake);
 	return -EIO;
 }
 MHI_STATUS mhi_open_channel(mhi_client_handle **client_handle,
@@ -182,6 +208,17 @@ void mhi_close_channel(mhi_client_handle *mhi_handle)
 	kfree(mhi_handle);
 }
 
+void ring_ev_db(mhi_device_ctxt *mhi_dev_ctxt, u32 event_ring_index)
+{
+	mhi_ring *event_ctxt = NULL;
+	u64 db_value = 0;
+	event_ctxt =
+		&mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index];
+	db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
+			(uintptr_t)event_ctxt->wp);
+	MHI_WRITE_DB(mhi_dev_ctxt->event_db_addr,
+				event_ring_index, db_value);
+}
 /**
  * @brief Add elements to event ring for the device to use
  *
@@ -193,8 +230,13 @@ MHI_STATUS mhi_add_elements_to_event_rings(mhi_device_ctxt *mhi_dev_ctxt,
 					STATE_TRANSITION new_state)
 {
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
+	MHI_EVENT_RING_STATE event_ring_state = MHI_EVENT_RING_UINIT;
 	switch (new_state) {
 	case STATE_TRANSITION_READY:
+		MHI_GET_EVENT_RING_INFO(EVENT_RING_STATE_FIELD,
+				mhi_dev_ctxt->ev_ring_props[PRIMARY_EVENT_RING],
+				event_ring_state);
+		if (MHI_EVENT_RING_UINIT == event_ring_state) {
 		ret_val = mhi_init_event_ring(mhi_dev_ctxt,
 			   EV_EL_PER_RING,
 			   mhi_dev_ctxt->alloced_ev_rings[PRIMARY_EVENT_RING]);
@@ -203,9 +245,21 @@ MHI_STATUS mhi_add_elements_to_event_rings(mhi_device_ctxt *mhi_dev_ctxt,
 			mhi_log(MHI_MSG_ERROR,
 				"Failed to add ev el on event ring\n");
 			return MHI_STATUS_ERROR;
+			}
+			MHI_SET_EVENT_RING_INFO(EVENT_RING_STATE_FIELD,
+				mhi_dev_ctxt->ev_ring_props[PRIMARY_EVENT_RING],
+				MHI_EVENT_RING_INIT);
 		}
+		mhi_log(MHI_MSG_ERROR,
+			"Event ring initialized ringing, EV DB to resume\n");
+		ring_ev_db(mhi_dev_ctxt,
+			mhi_dev_ctxt->alloced_ev_rings[PRIMARY_EVENT_RING]);
 		break;
 	case STATE_TRANSITION_AMSS:
+		MHI_GET_EVENT_RING_INFO(EVENT_RING_STATE_FIELD,
+				mhi_dev_ctxt->ev_ring_props[SECONDARY_EVENT_RING],
+				event_ring_state);
+		if (MHI_EVENT_RING_UINIT == event_ring_state) {
 		ret_val = mhi_init_event_ring(mhi_dev_ctxt,
 			 EV_EL_PER_RING,
 			 mhi_dev_ctxt->alloced_ev_rings[SECONDARY_EVENT_RING]);
@@ -223,6 +277,17 @@ MHI_STATUS mhi_add_elements_to_event_rings(mhi_device_ctxt *mhi_dev_ctxt,
 				"Failed to add ev el on event ring\n");
 			return MHI_STATUS_ERROR;
 		}
+		MHI_SET_EVENT_RING_INFO(EVENT_RING_STATE_FIELD,
+				mhi_dev_ctxt->ev_ring_props[SECONDARY_EVENT_RING],
+				MHI_EVENT_RING_INIT);
+		MHI_SET_EVENT_RING_INFO(EVENT_RING_STATE_FIELD,
+				mhi_dev_ctxt->ev_ring_props[TERTIARY_EVENT_RING],
+				MHI_EVENT_RING_INIT);
+		}
+		ring_ev_db(mhi_dev_ctxt,
+			mhi_dev_ctxt->alloced_ev_rings[SECONDARY_EVENT_RING]);
+		ring_ev_db(mhi_dev_ctxt,
+			mhi_dev_ctxt->alloced_ev_rings[TERTIARY_EVENT_RING]);
 	break;
 	default:
 		mhi_log(MHI_MSG_ERROR,
@@ -264,6 +329,7 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	mhi_device_ctxt *mhi_dev_ctxt;
 	unsigned long flags;
 	uintptr_t trb_index;
+	mhi_chan_ctxt *chan_ctxt;
 
 	if (NULL == client_handle || !VALID_CHAN_NR(client_handle->chan) ||
 		0 == buf || chain >= MHI_TRE_CHAIN_LIMIT || 0 == buf_len) {
@@ -273,7 +339,7 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	MHI_ASSERT(VALID_BUF(buf, buf_len));
 	mhi_dev_ctxt = client_handle->mhi_dev_ctxt;
 	chan = client_handle->chan;
-
+	chan_ctxt = &mhi_dev_ctxt->mhi_ctrl_seg->mhi_cc_list[chan];
 
 		/* Bump up the vote for pending data */
 		read_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
@@ -292,7 +358,7 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 		goto error;
 	}
 
-	pkt_loc->data_tx_pkt.buffer_ptr = (uintptr_t)buf;
+	pkt_loc->data_tx_pkt.buffer_ptr = buf;
 
 	get_element_index(&mhi_dev_ctxt->mhi_local_chan_ctxt[chan],
 				pkt_loc, &trb_index);
@@ -308,8 +374,9 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	MHI_TRB_SET_INFO(TX_TRB_TYPE, pkt_loc, MHI_PKT_TYPE_TRANSFER);
 	MHI_TX_TRB_SET_LEN(TX_TRB_LEN, pkt_loc, buf_len);
 
-	if (likely(MHI_STATE_M0 == mhi_dev_ctxt->mhi_state ||
-		MHI_STATE_M1 == mhi_dev_ctxt->mhi_state)) {
+	if (likely(((MHI_STATE_M0 == mhi_dev_ctxt->mhi_state) ||
+		(MHI_STATE_M1 == mhi_dev_ctxt->mhi_state)) &&
+		(chan_ctxt->mhi_chan_state == MHI_CHAN_STATE_RUNNING))) {
 		spin_lock_irqsave(&mhi_dev_ctxt->db_write_lock[chan], flags);
 		mhi_dev_ctxt->mhi_chan_db_order[chan]++;
 		db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
@@ -475,7 +542,7 @@ MHI_STATUS parse_xfer_event(mhi_device_ctxt *ctxt, mhi_event_pkt *event)
 	u32 i;
 
 	switch (MHI_EV_READ_CODE(EV_TRB_CODE, event)) {
-	case MHI_EVENT_CC_SUCCESS:
+	case MHI_EVENT_CC_EOB:
 		mhi_log(MHI_MSG_VERBOSE, "IEOB condition detected\n");
 	case MHI_EVENT_CC_EOT:
 	{
@@ -543,7 +610,6 @@ MHI_STATUS parse_xfer_event(mhi_device_ctxt *ctxt, mhi_event_pkt *event)
 				result = &client_handle->result;
 				result->payload_buf = trb_data_loc;
 				result->bytes_xferd = xfer_len;
-				result->transaction_status = MHI_STATUS_SUCCESS;
 				result->user_data = client_handle->user_data;
 			}
 			if (chan % 2) {
@@ -701,6 +767,8 @@ MHI_STATUS parse_cmd_event(mhi_device_ctxt *mhi_dev_ctxt, mhi_event_pkt *ev_pkt)
 		/* Command completion was successful */
 	case MHI_EVENT_CC_SUCCESS:
 	{
+		u32 chan;
+		MHI_TRB_GET_INFO(CMD_TRB_CHID, cmd_pkt, chan);
 		switch (MHI_TRB_READ_INFO(CMD_TRB_TYPE, cmd_pkt)) {
 		case MHI_PKT_TYPE_NOOP_CMD:
 			mhi_log(MHI_MSG_INFO, "Processed NOOP cmd event\n");
@@ -713,15 +781,13 @@ MHI_STATUS parse_cmd_event(mhi_device_ctxt *mhi_dev_ctxt, mhi_event_pkt *ev_pkt)
 		break;
 		case MHI_PKT_TYPE_STOP_CHAN_CMD:
 		{
-			u32 chan = MHI_EV_READ_CHID(EV_CHID, ev_pkt);
+
 			mhi_log(MHI_MSG_INFO, "Processed cmd stop event\n");
 			if (MHI_STATUS_SUCCESS != ret_val) {
 				mhi_log(MHI_MSG_INFO,
 						"Failed to set chan state\n");
 				return MHI_STATUS_ERROR;
 			}
-			mhi_dev_ctxt->mhi_chan_pend_cmd_ack[chan] =
-							MHI_CMD_NOT_PENDING;
 			break;
 		}
 		case MHI_PKT_TYPE_START_CHAN_CMD:
@@ -741,6 +807,7 @@ MHI_STATUS parse_cmd_event(mhi_device_ctxt *mhi_dev_ctxt, mhi_event_pkt *ev_pkt)
 			break;
 		}
 		mhi_log(MHI_MSG_INFO, "CMD completion indicated successful\n");
+		mhi_dev_ctxt->mhi_chan_pend_cmd_ack[chan] = MHI_CMD_NOT_PENDING;
 		break;
 	}
 	default:
@@ -905,6 +972,7 @@ MHI_STATUS parse_inbound(mhi_device_ctxt *mhi_dev_ctxt, u32 chan,
 	mhi_client_handle *client_handle;
 	mhi_ring *local_chan_ctxt;
 	mhi_result *result;
+	mhi_cb_info cb_info;
 
 	client_handle = mhi_dev_ctxt->client_handle_list[chan];
 	local_chan_ctxt = &mhi_dev_ctxt->mhi_local_chan_ctxt[chan];
@@ -927,9 +995,14 @@ MHI_STATUS parse_inbound(mhi_device_ctxt *mhi_dev_ctxt, u32 chan,
 		local_ev_trb_loc,
 		xfer_len);
 		ctxt_del_element(local_chan_ctxt, NULL);
-		if (NULL != client_handle->client_info.mhi_xfer_cb &&
-		   (0 == (client_handle->pkt_count % client_handle->cb_mod)))
-			client_handle->client_info.mhi_xfer_cb(result);
+		if (NULL != client_handle->client_info.mhi_client_cb &&
+		   (0 == (client_handle->pkt_count % client_handle->cb_mod))) {
+			cb_info.cb_reason = MHI_CB_XFER_SUCCESS;
+			cb_info.result = &client_handle->result;
+			cb_info.result->transaction_status =
+					MHI_STATUS_SUCCESS;
+			client_handle->client_info.mhi_client_cb(&cb_info);
+		}
 	} else  {
 		/* IN Hardware channel with no client
 		 * registered, we are done with this TRB*/
@@ -954,6 +1027,7 @@ MHI_STATUS parse_outbound(mhi_device_ctxt *mhi_dev_ctxt, u32 chan,
 	MHI_STATUS ret_val = 0;
 	mhi_client_handle *client_handle = NULL;
 	mhi_ring *local_chan_ctxt = NULL;
+	mhi_cb_info cb_info;
 	local_chan_ctxt = &mhi_dev_ctxt->mhi_local_chan_ctxt[chan];
 	client_handle = mhi_dev_ctxt->client_handle_list[chan];
 
@@ -969,9 +1043,15 @@ MHI_STATUS parse_outbound(mhi_device_ctxt *mhi_dev_ctxt, u32 chan,
 
 	if (NULL != client_handle) {
 		result = &mhi_dev_ctxt->client_handle_list[chan]->result;
-		if (NULL != (&client_handle->client_info.mhi_xfer_cb) &&
-		   (0 == (client_handle->pkt_count % client_handle->cb_mod)))
-			client_handle->client_info.mhi_xfer_cb(result);
+
+		if (NULL != (&client_handle->client_info.mhi_client_cb) &&
+		   (0 == (client_handle->pkt_count % client_handle->cb_mod))) {
+			cb_info.cb_reason = MHI_CB_XFER_SUCCESS;
+			cb_info.result = &client_handle->result;
+			cb_info.result->transaction_status =
+					MHI_STATUS_SUCCESS;
+			client_handle->client_info.mhi_client_cb(&cb_info);
+		}
 	}
 	ret_val = ctxt_del_element(&mhi_dev_ctxt->mhi_local_chan_ctxt[chan],
 						NULL);
