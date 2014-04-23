@@ -402,12 +402,13 @@ MHI_STATUS mhi_init_event_ring(mhi_device_ctxt *mhi_dev_ctxt, u32 nr_ev_el,
 {
 	mhi_event_pkt *ev_pkt = NULL;
 	u32 i = 0;
-	u64 db_value = 0;
 	unsigned long flags = 0;
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
 	spinlock_t *lock =
 		&mhi_dev_ctxt->mhi_ev_spinlock_list[event_ring_index];
 	mhi_ring *event_ctxt = NULL;
+	event_ctxt =
+		&mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index];
 
 	if (NULL == mhi_dev_ctxt || 0 == nr_ev_el) {
 		mhi_log(MHI_MSG_ERROR, "Bad Input data, quitting\n");
@@ -422,8 +423,6 @@ MHI_STATUS mhi_init_event_ring(mhi_device_ctxt *mhi_dev_ctxt, u32 nr_ev_el,
 			"Initializing event ring %d\n", event_ring_index);
 
 	for (i = 0; i < nr_ev_el - 1; ++i) {
-		event_ctxt =
-			&mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index];
 		ret_val = ctxt_add_element(event_ctxt, (void *)&ev_pkt);
 		if (MHI_STATUS_SUCCESS != ret_val) {
 			mhi_log(MHI_MSG_ERROR,
@@ -431,10 +430,6 @@ MHI_STATUS mhi_init_event_ring(mhi_device_ctxt *mhi_dev_ctxt, u32 nr_ev_el,
 			ret_val = MHI_STATUS_ERROR;
 			break;
 		}
-		db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
-				(uintptr_t)event_ctxt->wp);
-		MHI_WRITE_DB(mhi_dev_ctxt->event_db_addr,
-					event_ring_index, db_value);
 	}
 
 	spin_unlock_irqrestore(lock, flags);

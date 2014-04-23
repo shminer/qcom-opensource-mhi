@@ -22,30 +22,51 @@ mhi_pcie_devices mhi_devices;
 
 static const struct pci_device_id mhi_pcie_device_id[] = {
 	{ MHI_PCIE_VENDOR_ID, MHI_PCIE_DEVICE_ID,
-	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+		PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
 	{ 0, },
 };
 
+static const struct of_device_id mhi_plat_match[] = {
+	{
+		.compatible = "mhi",
+		.data = NULL,
+	},
+	{},
+};
 MODULE_DEVICE_TABLE(pci, mhi_pcie_device_id);
+MODULE_DEVICE_TABLE(of, mhi_plat_match);
 
 struct pci_driver mhi_pcie_driver = {
-	.name = "mhi_driver",
+	.name = "mhi",
 	.id_table = mhi_pcie_device_id,
 	.probe = mhi_probe,
 	.remove = mhi_remove,
 	.suspend = mhi_suspend,
 	.resume = mhi_resume,
+	.driver = {
+		.name = "mhi",
+		.of_match_table = of_match_ptr(mhi_plat_match),
+	},
 };
 
 int mhi_probe(struct pci_dev *pcie_device,
 		const struct pci_device_id *mhi_device_id)
 {
 	int ret_val = 0;
+	struct device_node *dt_node = NULL;
 	mhi_pcie_dev_info *mhi_pcie_dev = NULL;
-	osal_thread mhi_startup_thread_handle = {0};
 
+	dt_node = of_find_node_by_path("/");
+	if (!dt_node) {
+		mhi_log(MHI_MSG_ERROR, "Could not find root node:\n" );
+		return -ENODEV;
+	}
+	dt_node = of_find_node_by_name(dt_node, "qcom,mhi");
+	if (!dt_node) {
+		mhi_log(MHI_MSG_ERROR, "Failed to find device-tree node:\n");
+		return -ENODEV;
+	}
 	mhi_log(MHI_MSG_INFO, "Entering.\n");
-
 	mhi_pcie_dev = &mhi_devices.device_list[mhi_devices.nr_of_devices];
 	if (mhi_devices.nr_of_devices + 1 > MHI_MAX_SUPPORTED_DEVICES) {
 		mhi_log(MHI_MSG_ERROR, "Error: Too many devices\n");
@@ -53,14 +74,19 @@ int mhi_probe(struct pci_dev *pcie_device,
 	}
 
 	mhi_devices.nr_of_devices++;
+	pcie_device->dev.of_node = dt_node;
 	mhi_pcie_dev->pcie_device = pcie_device;
-	ret_val = mhi_spawn_thread(mhi_pcie_dev,
-				mhi_startup_thread,
-				&mhi_startup_thread_handle,
-				"MHI_DPROBE_THREAD");
+	mhi_pcie_dev->mhi_pcie_driver = &mhi_pcie_driver;
+	mhi_pcie_dev->mhi_pci_link_event.events =
+			(MSM_PCIE_EVENT_LINKDOWN | MSM_PCIE_EVENT_LINKUP);
+	mhi_pcie_dev->mhi_pci_link_event.user = pcie_device;
+	mhi_pcie_dev->mhi_pci_link_event.callback = mhi_link_state_cb;
+	mhi_pcie_dev->mhi_pci_link_event.notify.data = mhi_pcie_dev;
+	ret_val = msm_pcie_register_event( &mhi_pcie_dev->mhi_pci_link_event);
 	if (ret_val)
 		mhi_log(MHI_MSG_ERROR,
-			"Failed to spawn deferred probe thread\n");
+			"Failed to register for link notifications %d.\n",
+			ret_val);
 	return ret_val;
 }
 void mhi_remove(struct pci_dev *mhi_device)
@@ -94,6 +120,7 @@ int mhi_startup_thread(void *ctxt)
 {
 	int ret_val = 0;
 	u32 i = 0;
+	u32 retry_count = 0;
 	mhi_pcie_dev_info *mhi_pcie_dev = (mhi_pcie_dev_info *)ctxt;
 	struct pci_dev *pcie_device =
 		(struct pci_dev *)mhi_pcie_dev->pcie_device;
@@ -105,13 +132,25 @@ int mhi_startup_thread(void *ctxt)
 
 	if (0 != ret_val) {
 		mhi_log(MHI_MSG_CRITICAL,
-			"Failed to initialize pcie device, ret %d\n",
-			ret_val);
+				"Failed to initialize pcie device, ret %d\n",
+				ret_val);
 	}
 	ret_val = mhi_init_device_ctxt(mhi_pcie_dev,
 					&mhi_pcie_dev->mhi_ctxt);
 	if (MHI_STATUS_SUCCESS != ret_val)
+	{
+		mhi_log(MHI_MSG_CRITICAL,
+			"Failed to initialize main MHI ctxt ret %d\n",
+			ret_val);
 		goto msi_config_err;
+	}
+	ret_val = mhi_esoc_register(mhi_pcie_dev->mhi_ctxt);
+	if (ret_val) {
+		mhi_log(MHI_MSG_ERROR,
+				"Failed to register with esoc ret %d.\n",
+				ret_val);
+	}
+
 
 	mhi_pcie_dev->mhi_ctxt->usecase[0].num_paths = 1;
 	mhi_pcie_dev->mhi_ctxt->usecase[0].vectors =
@@ -151,11 +190,10 @@ int mhi_startup_thread(void *ctxt)
 	ret_val = pci_enable_msi_block(pcie_device, MAX_NR_MSI + 1);
 	if (0 != ret_val) {
 		mhi_log(MHI_MSG_ERROR,
-			"Failed to enable MSIs for pcie dev ret_val = %d.\n",
+			"Failed to enable MSIs for pcie dev ret_val %d.\n",
 			ret_val);
 		goto msi_config_err;
 	}
-
 	for (i = 0; i < MAX_NR_MSI; ++i) {
 		ret_val = request_irq(pcie_device->irq + i,
 					irq_cb,
@@ -173,12 +211,28 @@ int mhi_startup_thread(void *ctxt)
 	mhi_log(MHI_MSG_VERBOSE,
 		"Setting IRQ Base to 0x%x\n", mhi_pcie_dev->core.irq_base);
 	mhi_pcie_dev->core.max_nr_msis = MAX_NR_MSI;
+	do  {
 	ret_val = mhi_init_gpios(mhi_pcie_dev);
-	if (0 != ret_val) {
-		mhi_log(MHI_MSG_ERROR | MHI_DBG_POWER,
-			"Failed to register for GPIO.\n");
+		switch (ret_val) {
+		case -EPROBE_DEFER:
+			mhi_log(MHI_MSG_VERBOSE,
+				"DT requested probe defer, wait and retry\n");
+			msleep(500);
+			break;
+		case 0:
+			mhi_pcie_dev->mhi_ctxt->device_wake = ret_val;
+			mhi_log(MHI_MSG_VERBOSE,
+				"Got DEVICE_WAKE GPIO 0x%x from device tree\n",
+				mhi_pcie_dev->mhi_ctxt->device_wake);
+			break;
+		default:
+			mhi_log(MHI_MSG_CRITICAL,
+				"Could not get gpio from device tree!\n");
 		goto msi_config_err;
+			break;
 	}
+		retry_count++;
+	}while ((retry_count < 300) && (ret_val == -EPROBE_DEFER));
 	ret_val = mhi_init_pm_sysfs(&pcie_device->dev);
 	if (0 != ret_val) {
 		mhi_log(MHI_MSG_ERROR, "Failed to setup sysfs.\n");
@@ -187,18 +241,18 @@ int mhi_startup_thread(void *ctxt)
 	if (0 != mhi_init_debugfs(mhi_pcie_dev->mhi_ctxt))
 		mhi_log(MHI_MSG_ERROR, "Failed to init debugfs.\n");
 
-	pci_set_master(pcie_device);
+
 	mhi_pcie_dev->mhi_ctxt->mmio_addr = (mhi_pcie_dev->core.bar0_base);
 	pcie_device->dev.platform_data = (void *)&mhi_pcie_dev->mhi_ctxt;
-
-	/* Fire off the state transition  thread */
-	ret_val = mhi_init_state_transition(mhi_pcie_dev->mhi_ctxt,
-					STATE_TRANSITION_RESET);
-	if (MHI_STATUS_SUCCESS != ret_val) {
-		mhi_log(MHI_MSG_CRITICAL,
-			"Failed to start state change event\n");
-		goto mhi_state_transition_error;
+	if (mhi_pcie_dev->mhi_ctxt->base_state == STATE_TRANSITION_BHI) {
+		ret_val = bhi_probe(mhi_pcie_dev);
+		if (ret_val) {
+			mhi_log(MHI_MSG_ERROR, "Failed to initialize BHI.\n");
+			goto mhi_state_transition_error;
+		}
 	}
+	/* Fire off the state transition  thread */
+
 	mhi_log(MHI_MSG_INFO,
 			"Finished all driver probing returning ret_val %d.\n",
 			ret_val);
@@ -217,8 +271,8 @@ msi_config_err:
 }
 
 DECLARE_PCI_FIXUP_HEADER(MHI_PCIE_VENDOR_ID,
-			MHI_PCIE_DEVICE_ID,
-			mhi_msm_fixup);
+		MHI_PCIE_DEVICE_ID,
+		mhi_msm_fixup);
 module_exit(mhi_exit);
 module_init(mhi_init);
 MODULE_LICENSE("GPL v2");

@@ -92,15 +92,6 @@ typedef enum MHI_MSG_ID {
 	MHI_CTRL_MSG_ID = 0x12,
 } MHI_MSG_ID;
 typedef struct mhi_uci_ctxt_t mhi_uci_ctxt_t;
-typedef enum MHI_UCI_DEBUG_LEVEL {
-	MHI_DBG_VERBOSE = 0x0,
-	MHI_DBG_INFO = 0x1,
-	MHI_DBG_DBG = 0x2,
-	MHI_DBG_WARNING = 0x3,
-	MHI_DBG_ERROR = 0x4,
-	MHI_DBG_CRITICAL = 0x5,
-	MHI_DBG_reserved = 0x80000000
-} MHI_UCI_DEBUG_LEVEL;
 
 /* Begin MHI Specification Definition */
 typedef enum MHI_CHAN_DIR {
@@ -134,6 +125,7 @@ typedef struct uci_client {
 	u32 dev_node_enabled;
 	u8 local_tiocm;
 	atomic_t ref_count;
+	int mhi_status;
 } uci_client;
 
 typedef struct mhi_uci_ctxt_t {
@@ -146,10 +138,12 @@ typedef struct mhi_uci_ctxt_t {
 	struct mutex ctrl_mutex;
 	struct cdev cdev[MHI_MAX_SOFTWARE_CHANNELS];
 	struct class *mhi_uci_class;
+
 	u32 ctrl_chan_id;
+	atomic_t mhi_disabled;
 } mhi_uci_ctxt_t;
 
-void uci_xfer_cb(mhi_result *result);
+void uci_xfer_cb(mhi_cb_info *client_info);
 int mhi_uci_send_packet(mhi_client_handle *client_handle, void *buf,
 		u32 size, u32 chan);
 MHI_STATUS mhi_init_inbound(mhi_client_handle *client_handle,

@@ -100,18 +100,20 @@ int mhi_state_change_thread(void *ctxt)
 		mutex_lock(work_q->q_mutex);
 		cur_work_item = *(STATE_TRANSITION *)(state_change_q->rp);
 		*(STATE_TRANSITION *)(state_change_q->rp) = 0xDEADBEEF;
-		mhi_log(MHI_MSG_VERBOSE,
-		"AFTER ADD RP: 0x%lx WP:0x%lx STT: 0x%x, element_val 0x%x base 0x%lx\n",
-				(uintptr_t)work_q->q_info.rp,
-				(uintptr_t)work_q->q_info.wp,
-				cur_work_item,
-				*(STATE_TRANSITION *)(state_change_q->rp),
-				(uintptr_t)work_q->q_info.base);
 		ret_val = ctxt_del_element(&work_q->q_info, NULL);
 		MHI_ASSERT(ret_val == MHI_STATUS_SUCCESS);
 		mutex_unlock(work_q->q_mutex);
 		ret_val = process_stt_work_item(mhi_dev_ctxt, cur_work_item);
-				MHI_ASSERT(ret_val == MHI_STATUS_SUCCESS);
+		if (ret_val != MHI_STATUS_SUCCESS)
+		{
+			u32 i;
+			for (i = 0; i< 100; ++i) {
+				mhi_log(MHI_MSG_VERBOSE,
+				"Detected failure in STT waiting %d\n",i);
+				msleep(5000);
+			}
+		}
+				///MHI_ASSERT(ret_val == MHI_STATUS_SUCCESS);
 	}
 	return 0;
 }
@@ -208,13 +210,6 @@ MHI_STATUS mhi_init_state_transition(mhi_device_ctxt *mhi_dev_ctxt,
 	*(STATE_TRANSITION *)stt_ring->wp = new_state;
 	ret_val = ctxt_add_element(stt_ring, (void **)&cur_work_item);
 	wmb();
-	mhi_log(MHI_MSG_VERBOSE ,
-	"AFTER ADD RP: 0x%lx WP:0x%lx STT: 0x%x, element_val 0x%x base 0x%lx\n",
-		(uintptr_t)work_q->q_info.rp,
-		(uintptr_t)work_q->q_info.wp,
-		new_state,
-		*(STATE_TRANSITION *)stt_ring->wp,
-		(uintptr_t)work_q->q_info.base);
 	MHI_ASSERT(MHI_STATUS_SUCCESS == ret_val);
 	mutex_unlock(work_q->q_mutex);
 	wake_up_interruptible(mhi_dev_ctxt->state_change_event_handle);
@@ -366,9 +361,7 @@ void ring_all_chan_dbs(mhi_device_ctxt *mhi_dev_ctxt)
 				(uintptr_t)local_ctxt->rp);
 			db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 				(uintptr_t)local_ctxt->wp);
-			if ((rp != db_value) && ((i % 2) == 0))
-				conditional_chan_db_write(mhi_dev_ctxt, i);
-			else
+			if ((rp != db_value) || ((i % 2)))
 				conditional_chan_db_write(mhi_dev_ctxt, i);
 		}
 }
@@ -484,10 +477,11 @@ MHI_STATUS process_READY_transition(mhi_device_ctxt *mhi_dev_ctxt,
 MHI_STATUS process_RESET_transition(mhi_device_ctxt *mhi_dev_ctxt,
 			STATE_TRANSITION cur_work_item)
 {
+	u32 i = 0;
+	u32 ev_ring_index;
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
 	mhi_log(MHI_MSG_INFO, "Processing RESET state transition\n");
 	mhi_dev_ctxt->mhi_reset_cntr++;
-	WARN_ON(1);
 	/*
 	if (mhi_dev_ctxt->mhi_reset_cntr >= 2) {
 		print_state_transitions(mhi_dev_ctxt);
@@ -519,6 +513,32 @@ MHI_STATUS process_RESET_transition(mhi_device_ctxt *mhi_dev_ctxt,
 		mhi_log(MHI_MSG_CRITICAL,
 			"Unexpected ret code detected for\n");
 		break;
+	}
+	/* Synchronise the local rp/wp with the ctxt rp/wp
+	   This will enable the device to pick up exactly where it left off, should
+	   this be an SSR recovery */
+	for (i = 0; i < NR_OF_CMD_RINGS; ++i) {
+		mhi_dev_ctxt->mhi_local_cmd_ctxt[i].rp = mhi_dev_ctxt->mhi_local_cmd_ctxt[i].base;
+		mhi_dev_ctxt->mhi_local_cmd_ctxt[i].wp = mhi_dev_ctxt->mhi_local_cmd_ctxt[i].base;
+		mhi_dev_ctxt->mhi_ctrl_seg->mhi_cmd_ctxt_list[i].mhi_cmd_ring_read_ptr =
+				mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
+			(uintptr_t)mhi_dev_ctxt->mhi_local_cmd_ctxt[i].rp);
+	}
+	for (i = 0; i < EVENT_RINGS_ALLOCATED; ++i) {
+		ev_ring_index = mhi_dev_ctxt->alloced_ev_rings[i];
+		mhi_dev_ctxt->mhi_ctrl_seg->mhi_ec_list[ev_ring_index].mhi_event_read_ptr =
+				mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
+			(uintptr_t)mhi_dev_ctxt->mhi_local_event_ctxt[ev_ring_index].rp);
+	}
+	for (i = 0; i < MHI_MAX_CHANNELS; ++i) {
+		if (VALID_CHAN_NR(i)) {
+		mhi_dev_ctxt->mhi_ctrl_seg->mhi_cc_list[i].mhi_trb_read_ptr =
+				mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
+			(uintptr_t)mhi_dev_ctxt->mhi_local_chan_ctxt[i].rp);
+		mhi_dev_ctxt->mhi_ctrl_seg->mhi_cc_list[i].mhi_trb_write_ptr =
+				mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
+			(uintptr_t)mhi_dev_ctxt->mhi_local_chan_ctxt[i].wp);
+		}
 	}
 	return ret_val;
 }
@@ -576,9 +596,20 @@ MHI_STATUS process_SBL_transition(mhi_device_ctxt *mhi_dev_ctxt,
 					"Failed to start chan0x%x, ret 0x%x\n",
 					chan, ret_val);
 				return MHI_STATUS_ERROR;
+			} else {
+					atomic_inc(
+					&mhi_dev_ctxt->start_cmd_pending_ack);
 			}
 		}
+		wait_event_interruptible(*mhi_dev_ctxt->chan_start_complete,
+		atomic_read(&mhi_dev_ctxt->start_cmd_pending_ack) == 0);
 	}
+
+	if (!mhi_dev_ctxt->mhi_clients_probed) {
+		ret_val = probe_clients(mhi_dev_ctxt);
+		mhi_dev_ctxt->mhi_clients_probed = 1;
+	}
+
 	return MHI_STATUS_SUCCESS;
 }
 MHI_STATUS process_AMSS_transition(mhi_device_ctxt *mhi_dev_ctxt,
@@ -586,8 +617,13 @@ MHI_STATUS process_AMSS_transition(mhi_device_ctxt *mhi_dev_ctxt,
 {
 	MHI_STATUS ret_val;
 	u32 chan;
+	unsigned long flags;
 	mhi_chan_ctxt *chan_ctxt;
 	mhi_log(MHI_MSG_INFO, "Processing AMSS state transition\n");
+	write_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
+	atomic_inc(&mhi_dev_ctxt->data_pending);
+	gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
+	write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 	for (chan = 0; chan <= MHI_MAX_CHANNELS; ++chan) {
 		if (VALID_CHAN_NR(chan)) {
 			chan_ctxt =
@@ -624,10 +660,24 @@ MHI_STATUS process_AMSS_transition(mhi_device_ctxt *mhi_dev_ctxt,
 		if (MHI_STATUS_SUCCESS != ret_val)
 			mhi_log(MHI_MSG_CRITICAL,
 				"Failed to set local chan state\n");
-		ret_val = probe_clients(mhi_dev_ctxt);
+		if (!mhi_dev_ctxt->mhi_clients_probed) {
+			ret_val = probe_clients(mhi_dev_ctxt);
+				if (ret_val != MHI_STATUS_SUCCESS)
+						mhi_log(MHI_MSG_CRITICAL,
+						"Failed to probe MHI CORE clients.\n");
+			mhi_dev_ctxt->mhi_clients_probed = 1;
+		} else {
+			ring_all_chan_dbs(mhi_dev_ctxt);
+			mhi_log(MHI_MSG_CRITICAL,
+				"Notifying clients that MHI is enabled\n");
+			mhi_notify_clients(mhi_dev_ctxt,
+					MHI_CB_MHI_ENABLED);
+		}
 		if (ret_val != MHI_STATUS_SUCCESS)
 			mhi_log(MHI_MSG_CRITICAL,
-				"Failed to probe MHI CORE clients.\n");
+				"Failed to probe MHI CORE clients, ret 0x%x \n",
+				ret_val);
 	}
+	atomic_dec(&mhi_dev_ctxt->data_pending);
 	return MHI_STATUS_SUCCESS;
 }
