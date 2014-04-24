@@ -27,8 +27,8 @@
 
 #define RMNET_MHI_DRIVER_NAME "rmnet_mhi"
 #define RMNET_MHI_DEV_NAME    "rmnet_mhi%d"
-#define MHI_DEFAULT_MTU        2000
-#define MHI_DEFAULT_MRU        2000
+#define MHI_DEFAULT_MTU        8000
+#define MHI_DEFAULT_MRU        8000
  /* TODO: This will go to the MHI Core HDR I guess */
 #define MHI_MAX_MRU            0xFFFF
 #define MHI_NAPI_WEIGHT_VALUE  12
