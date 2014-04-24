@@ -216,7 +216,7 @@ void ring_ev_db(mhi_device_ctxt *mhi_dev_ctxt, u32 event_ring_index)
 		&mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index];
 	db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 			(uintptr_t)event_ctxt->wp);
-	MHI_WRITE_DB(mhi_dev_ctxt->event_db_addr,
+	MHI_WRITE_DB(mhi_dev_ctxt, mhi_dev_ctxt->event_db_addr,
 				event_ring_index, db_value);
 }
 /**
@@ -381,7 +381,7 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 		mhi_dev_ctxt->mhi_chan_db_order[chan]++;
 		db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 			(uintptr_t)mhi_dev_ctxt->mhi_local_chan_ctxt[chan].wp);
-		MHI_WRITE_DB(mhi_dev_ctxt->channel_db_addr, chan, db_value);
+		MHI_WRITE_DB(mhi_dev_ctxt, mhi_dev_ctxt->channel_db_addr, chan, db_value);
 		spin_unlock_irqrestore(&mhi_dev_ctxt->db_write_lock[chan], flags);
 	} else {
 		mhi_log(MHI_MSG_INFO,
@@ -505,7 +505,7 @@ MHI_STATUS mhi_send_cmd(mhi_device_ctxt *mhi_dev_ctxt,
 	if (MHI_STATE_M0 == mhi_dev_ctxt->mhi_state ||
 		MHI_STATE_M1 == mhi_dev_ctxt->mhi_state) {
 		mhi_dev_ctxt->cmd_ring_order++;
-		MHI_WRITE_DB(mhi_dev_ctxt->cmd_db_addr, 0, db_value);
+		MHI_WRITE_DB(mhi_dev_ctxt, mhi_dev_ctxt->cmd_db_addr, 0, db_value);
 	}
 	mhi_log(MHI_MSG_VERBOSE, "Sent command 0x%x for chan 0x%x\n", cmd, chan);
 	mutex_unlock(&mhi_dev_ctxt->mhi_cmd_mutex_list[PRIMARY_CMD_RING]);
@@ -695,7 +695,7 @@ MHI_STATUS recycle_trb_and_ring(mhi_device_ctxt *mhi_dev_ctxt,
 				&mhi_dev_ctxt->mhi_cmd_mutex_list[PRIMARY_CMD_RING];
 			mutex_lock(cmd_mutex);
 			mhi_dev_ctxt->cmd_ring_order = 1;
-			MHI_WRITE_DB(mhi_dev_ctxt->cmd_db_addr,
+			MHI_WRITE_DB(mhi_dev_ctxt, mhi_dev_ctxt->cmd_db_addr,
 					ring_index, db_value);
 			mutex_unlock(cmd_mutex);
 			break;
@@ -707,7 +707,7 @@ MHI_STATUS recycle_trb_and_ring(mhi_device_ctxt *mhi_dev_ctxt,
 			lock = &mhi_dev_ctxt->mhi_ev_spinlock_list[ring_index];
 			spin_lock_irqsave(lock, flags);
 			mhi_dev_ctxt->mhi_ev_db_order[ring_index] = 1;
-				MHI_WRITE_DB(mhi_dev_ctxt->event_db_addr,
+				MHI_WRITE_DB(mhi_dev_ctxt, mhi_dev_ctxt->event_db_addr,
 						ring_index, db_value);
 			spin_unlock_irqrestore(lock, flags);
 			break;
@@ -717,7 +717,7 @@ MHI_STATUS recycle_trb_and_ring(mhi_device_ctxt *mhi_dev_ctxt,
 			unsigned long flags = 0;
 			spin_lock_irqsave(&mhi_dev_ctxt->db_write_lock[ring_index], flags);
 			mhi_dev_ctxt->mhi_chan_db_order[ring_index] = 1;
-			MHI_WRITE_DB(mhi_dev_ctxt->channel_db_addr,
+			MHI_WRITE_DB(mhi_dev_ctxt, mhi_dev_ctxt->channel_db_addr,
 					ring_index, db_value);
 			spin_unlock_irqrestore(&mhi_dev_ctxt->db_write_lock[ring_index],
 						flags);
@@ -937,7 +937,7 @@ MHI_STATUS mhi_client_recycle_trb(mhi_client_handle *client_handle)
 	read_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 	if (MHI_STATE_M0 == mhi_dev_ctxt->mhi_state ||
 	    MHI_STATE_M1 == mhi_dev_ctxt->mhi_state)
-		MHI_WRITE_DB(mhi_dev_ctxt->channel_db_addr, chan, db_value);
+		MHI_WRITE_DB(mhi_dev_ctxt, mhi_dev_ctxt->channel_db_addr, chan, db_value);
 	atomic_dec(&mhi_dev_ctxt->data_pending);
 	mhi_dev_ctxt->mhi_chan_cntr[chan].pkts_xferd++;
 	mutex_unlock(chan_mutex);
