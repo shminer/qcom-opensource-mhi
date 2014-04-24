@@ -341,8 +341,8 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	chan = client_handle->chan;
 	chan_ctxt = &mhi_dev_ctxt->mhi_ctrl_seg->mhi_cc_list[chan];
 
-		/* Bump up the vote for pending data */
-		read_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
+	/* Bump up the vote for pending data */
+	read_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
 
 	atomic_inc(&mhi_dev_ctxt->data_pending);
 	mhi_dev_ctxt->m1_m0++;
