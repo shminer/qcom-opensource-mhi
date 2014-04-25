@@ -718,8 +718,5 @@ MHI_STATUS mhi_init_timers(mhi_device_ctxt *mhi_dev_ctxt)
 	mhi_dev_ctxt->inactivity_tmr.function = mhi_initiate_M1;
 	mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
 		"Starting Inactivity timer\n");
-	hrtimer_start(&mhi_dev_ctxt->inactivity_tmr,
-				mhi_dev_ctxt->inactivity_timeout,
-				HRTIMER_MODE_REL);
 	return MHI_STATUS_SUCCESS;
 }

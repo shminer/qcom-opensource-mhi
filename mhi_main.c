@@ -346,6 +346,7 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 
 	atomic_inc(&mhi_dev_ctxt->data_pending);
 	mhi_dev_ctxt->m1_m0++;
+	if (mhi_dev_ctxt->link_up)
 	gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
 	read_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 
