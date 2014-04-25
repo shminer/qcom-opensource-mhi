@@ -152,8 +152,6 @@ enum hrtimer_restart mhi_initiate_M1(struct hrtimer *timer)
 			mhi_dev_ctxt->mhi_initialized) {
 		mhi_dev_ctxt->mhi_state = MHI_STATE_M1;
 		ret_val = gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 0);
-			mhi_log(MHI_MSG_VERBOSE,
-					"Allowing M1.\n");
 		mhi_dev_ctxt->m0_m1++;
 		if (ret_val)
 			mhi_log(MHI_MSG_ERROR | MHI_DBG_POWER,
