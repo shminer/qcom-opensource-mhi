@@ -185,7 +185,9 @@ MHI_STATUS mhi_open_channel(mhi_client_handle **client_handle,
 		(*client_handle)->cb_mod = 1;
 
 	if (MHI_CLIENT_IP_HW_0_OUT  == chan)
-		(*client_handle)->intmod_t = 3;
+		(*client_handle)->intmod_t = 10;
+	if (MHI_CLIENT_IP_HW_0_IN  == chan)
+		(*client_handle)->intmod_t = 10;
 	mhi_log(MHI_MSG_VERBOSE,
 		"Successfuly started chan 0x%x\n", chan);
 
