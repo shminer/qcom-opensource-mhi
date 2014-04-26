@@ -60,21 +60,20 @@ int mhi_suspend(struct pci_dev *pcie_dev, pm_message_t state)
 	}
 
 	if (mhi_dev_ctxt->link_up) {
-	ret_val = pci_save_state(pcie_dev);
-	if (ret_val) {
-		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
-				"Failed to save pci device state ret %d\n",
-				ret_val);
-		return MHI_STATUS_ERROR;
-	}
-
-	ret_val = pci_set_power_state(pcie_dev, PCI_D3hot);
-	if (ret_val) {
-		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
-			"Failed to put device in D3 hot ret %d\n", ret_val);
-		return MHI_STATUS_ERROR;
+		ret_val = pci_save_state(pcie_dev);
+		if (ret_val) {
+			mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+					"Failed to save pci device state ret %d\n",
+					ret_val);
+			return MHI_STATUS_ERROR;
 		}
-		mhi_dev_ctxt->link_up = 0;
+
+		ret_val = pci_set_power_state(pcie_dev, PCI_D3hot);
+		if (ret_val) {
+			mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+				"Failed to put device in D3 hot ret %d\n", ret_val);
+			return MHI_STATUS_ERROR;
+		}
 	} else {
 		gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 0);
 	}
