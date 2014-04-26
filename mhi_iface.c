@@ -164,8 +164,8 @@ int mhi_startup_thread(void *ctxt)
 	mhi_pcie_dev->mhi_ctxt->bus_vectors[0].ib = 0x0;
 	mhi_pcie_dev->mhi_ctxt->bus_vectors[1].src = 0x64;
 	mhi_pcie_dev->mhi_ctxt->bus_vectors[1].dst = 0x200;
-	mhi_pcie_dev->mhi_ctxt->bus_vectors[1].ab = 625000000;
-	mhi_pcie_dev->mhi_ctxt->bus_vectors[1].ib = 625000000;
+	mhi_pcie_dev->mhi_ctxt->bus_vectors[1].ab = 600000000ULL * 2;
+	mhi_pcie_dev->mhi_ctxt->bus_vectors[1].ib = 600000000ULL * 2;
 	mhi_pcie_dev->mhi_ctxt->bus_scale_table.name = "mhi";
 	mhi_pcie_dev->mhi_ctxt->bus_scale_table.num_usecases = 2;
 	mhi_pcie_dev->mhi_ctxt->bus_scale_table.active_only = 0;
