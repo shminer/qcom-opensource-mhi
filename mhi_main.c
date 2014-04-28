@@ -688,8 +688,8 @@ MHI_STATUS recycle_trb_and_ring(mhi_device_ctxt *mhi_dev_ctxt,
 	}
 	atomic_inc(&mhi_dev_ctxt->data_pending);
 	/* Asserting Device Wake here, will imediately wake mdm */
-	if (MHI_STATE_M0 == mhi_dev_ctxt->mhi_state ||
-	    MHI_STATE_M1 == mhi_dev_ctxt->mhi_state) {
+	if ((MHI_STATE_M0 == mhi_dev_ctxt->mhi_state ||
+	    MHI_STATE_M1 == mhi_dev_ctxt->mhi_state) && mhi_dev_ctxt->link_up) {
 		switch (ring_type) {
 		case MHI_RING_TYPE_CMD_RING:
 		{
@@ -933,8 +933,10 @@ MHI_STATUS mhi_client_recycle_trb(mhi_client_handle *client_handle)
 	db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 					(uintptr_t)local_ctxt->wp);
 	read_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
-	atomic_inc(&mhi_dev_ctxt->data_pending);
-	mhi_assert_device_wake(mhi_dev_ctxt);
+	 if (mhi_dev_ctxt->link_up) {
+		atomic_inc(&mhi_dev_ctxt->data_pending);
+		mhi_assert_device_wake(mhi_dev_ctxt);
+	}
 	read_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 	if (MHI_STATE_M0 == mhi_dev_ctxt->mhi_state ||
 	    MHI_STATE_M1 == mhi_dev_ctxt->mhi_state)
