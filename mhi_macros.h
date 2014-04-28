@@ -41,7 +41,7 @@
 #define MHI_MAX_SUPPORTED_DEVICES 1
 
 #define MAX_NR_TRBS_PER_SOFT_CHAN 10
-#define MAX_NR_TRBS_PER_HARD_CHAN 256
+#define MAX_NR_TRBS_PER_HARD_CHAN 128
 #define MHI_PCIE_VENDOR_ID 0x17CB
 #define MHI_PCIE_DEVICE_ID 0x0300
 #define TRB_MAX_DATA_SIZE 0xFFFF
@@ -244,18 +244,23 @@
 		_val >>= (u32)(_shift); \
 	} while (0)
 
-#define MHI_WRITE_DB(_addr, _index, _val) \
+#define MHI_WRITE_DB(_mhi_dev_ctxt, _addr, _index, _val) \
 { \
 	u32 word; \
 	u32 offset = _index * sizeof(u64); \
 	mhi_log(MHI_MSG_VERBOSE, \
 			"db.set addr: 0x%llX offset 0x%x val:0x%llX\n",\
 			(u64)_addr, (unsigned int)_index, (u64)_val); \
-	wmb(); \
-	word = HIGH_WORD((u64)(_val)); \
+	if (mhi_dev_ctxt->channel_db_addr == (_addr)) {                    \
+		(_mhi_dev_ctxt)->mhi_ctrl_seg->mhi_cc_list[_index].mhi_trb_write_ptr = (_val);  \
+	} else if (mhi_dev_ctxt->event_db_addr == (_addr)) {				     \
+		(_mhi_dev_ctxt)->mhi_ctrl_seg->mhi_ec_list[_index].mhi_event_write_ptr = (_val);\
+	}				     \
+	wmb();				     \
+	word = HIGH_WORD((u64)(_val));       \
 	pcie_write(_addr, offset + 4, word); \
-	word = LOW_WORD((u64)(_val)); \
-	pcie_write(_addr, offset, word); \
+	word = LOW_WORD((u64)(_val));	     \
+	pcie_write(_addr, offset, word);     \
 	wmb(); \
 }
 
