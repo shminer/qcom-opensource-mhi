@@ -45,11 +45,6 @@ int mhi_suspend(struct pci_dev *pcie_dev, pm_message_t state)
 	if (NULL == mhi_dev_ctxt)
 		return 0;
 
-	if (!mhi_dev_ctxt->link_up) {
-		mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
-			"Link is not up, nothing to do.\n");
-		return 0;
-	}
 	if (mhi_dev_ctxt->mhi_state == MHI_STATE_M0 ||
 	    mhi_dev_ctxt->mhi_state == MHI_STATE_M1 ||
 	    mhi_dev_ctxt->mhi_state == MHI_STATE_M2) {
@@ -58,25 +53,27 @@ int mhi_suspend(struct pci_dev *pcie_dev, pm_message_t state)
 	} else {
 		return 0;
 	}
-
-	if (mhi_dev_ctxt->link_up) {
-		ret_val = pci_save_state(pcie_dev);
-		if (ret_val) {
-			mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
-					"Failed to save pci device state ret %d\n",
-					ret_val);
-			return MHI_STATUS_ERROR;
-		}
-
-		ret_val = pci_set_power_state(pcie_dev, PCI_D3hot);
-		if (ret_val) {
-			mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
-				"Failed to put device in D3 hot ret %d\n", ret_val);
-			return MHI_STATUS_ERROR;
-		}
-	} else {
-		gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 0);
+	ret_val =
+		msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client, 0);
+	if (!mhi_dev_ctxt->link_up) {
+		mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
+			"Link is not up, nothing to do.\n");
+		return 0;
 	}
+	ret_val = pci_save_state(pcie_dev);
+	if (ret_val) {
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+				"Failed to save pci device state ret %d\n",
+				ret_val);
+		return MHI_STATUS_ERROR;
+	}
+	ret_val = pci_set_power_state(pcie_dev, PCI_D3hot);
+	if (ret_val) {
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+			"Failed to put device in D3 hot ret %d\n", ret_val);
+		return MHI_STATUS_ERROR;
+	}
+	gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 0);
 	return 0;
 }
 
@@ -240,8 +237,7 @@ int mhi_initiate_M3(mhi_device_ctxt *mhi_dev_ctxt)
 
 	mhi_log(MHI_MSG_INFO | MHI_DBG_POWER, "Entering...\n");
 
-	ret_val =
-		msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client, 0);
+
 	if (ret_val)
 		mhi_log(MHI_MSG_CRITICAL,
 			"Could not set bus frequency ret: %d\n",
