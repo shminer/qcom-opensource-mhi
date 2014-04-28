@@ -308,11 +308,12 @@ MHI_STATUS process_M0_transition(mhi_device_ctxt *mhi_dev_ctxt,
 		ring_all_ev_dbs(mhi_dev_ctxt);
 		ring_all_chan_dbs(mhi_dev_ctxt);
 		ring_all_cmd_dbs(mhi_dev_ctxt);
-		wake_up_interruptible(mhi_dev_ctxt->M0_event);
 		atomic_dec(&mhi_dev_ctxt->data_pending);
-	} else {
-	wake_up_interruptible(mhi_dev_ctxt->M0_event);
 	}
+	wake_up_interruptible(mhi_dev_ctxt->M0_event);
+	hrtimer_start(&mhi_dev_ctxt->inactivity_tmr,
+				mhi_dev_ctxt->inactivity_timeout,
+				HRTIMER_MODE_REL);
 	return MHI_STATUS_SUCCESS;
 }
 
@@ -407,10 +408,8 @@ MHI_STATUS process_M1_transition(mhi_device_ctxt  *mhi_dev_ctxt,
 	mhi_log(MHI_MSG_INFO, "Allowing transition to M2\n");
 	mhi_dev_ctxt->m0_m1++;
 	mhi_dev_ctxt->mhi_state = MHI_STATE_M2;
-	/*
 	mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
 		"Cancelling Inactivity timer\n");
-	/
 	switch(hrtimer_try_to_cancel(&mhi_dev_ctxt->inactivity_tmr))
 	{
 	case 0:
@@ -424,7 +423,8 @@ MHI_STATUS process_M1_transition(mhi_device_ctxt  *mhi_dev_ctxt,
 	case -1:
 		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
 			"Timer executing and can't stop\n");
-	} */
+		break;
+	}
 	wmb();
 	//TODO:  Stop xfers from occuring?
 	MHI_REG_WRITE_FIELD(mhi_dev_ctxt->mmio_addr, MHICTRL,
@@ -566,6 +566,20 @@ MHI_STATUS process_M3_transition(mhi_device_ctxt *mhi_dev_ctxt,
 	unsigned long flags;
 	mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
 			"Processing M3 state transition\n");
+	switch(hrtimer_try_to_cancel(&mhi_dev_ctxt->inactivity_tmr))
+	{
+	case 0:
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+			"Timer was not active\n");
+		break;
+	case 1:
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+			"Timer was active\n");
+		break;
+	case -1:
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+			"Timer executing and can't stop\n");
+	}
 	write_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
 	mhi_dev_ctxt->mhi_state = MHI_STATE_M3;
 	mhi_dev_ctxt->pending_M3 = 0;

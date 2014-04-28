@@ -111,6 +111,20 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify)
 			"Received Link Down Callback\n");
 		if (NULL == mhi_dev_ctxt)
 			return;
+		switch(hrtimer_try_to_cancel(&mhi_dev_ctxt->inactivity_tmr))
+		{
+		case 0:
+			mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+				"Timer was not active\n");
+			break;
+		case 1:
+			mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+				"Timer was active\n");
+			break;
+		case -1:
+			mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+				"Timer executing and can't stop\n");
+		}
 		mhi_dev_ctxt->link_up = 0;
 		mhi_log(MHI_MSG_CRITICAL,
 			"Informing clients of MHI that link is down\n");
