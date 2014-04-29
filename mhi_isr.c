@@ -26,6 +26,7 @@ irqreturn_t irq_cb(int irq_number, void *dev_id)
 		mhi_log(MHI_MSG_ERROR, "Failed to get a proper context\n");
 		return IRQ_HANDLED;
 	}
+	mhi_dev_ctxt->msi_counter[IRQ_TO_MSI(mhi_dev_ctxt, irq_number)]++;
 	mhi_log(MHI_MSG_VERBOSE,
 			"Got MSI 0x%x\n",IRQ_TO_MSI(mhi_dev_ctxt, irq_number));
 	switch (IRQ_TO_MSI(mhi_dev_ctxt, irq_number)) {

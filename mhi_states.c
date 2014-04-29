@@ -288,6 +288,7 @@ MHI_STATUS process_M0_transition(mhi_device_ctxt *mhi_dev_ctxt,
 			STATE_TRANSITION cur_work_item)
 {
 	unsigned long flags;
+	int ret_val;
 	mhi_log(MHI_MSG_VERBOSE, "Processing M0 state transition\n");
 
 	/* Wait for mhi_dev_ctxt transition to M0 */
@@ -311,9 +312,10 @@ MHI_STATUS process_M0_transition(mhi_device_ctxt *mhi_dev_ctxt,
 		atomic_dec(&mhi_dev_ctxt->data_pending);
 	}
 	wake_up_interruptible(mhi_dev_ctxt->M0_event);
-	hrtimer_start(&mhi_dev_ctxt->inactivity_tmr,
+	ret_val = hrtimer_start(&mhi_dev_ctxt->inactivity_tmr,
 				mhi_dev_ctxt->inactivity_timeout,
 				HRTIMER_MODE_REL);
+	mhi_log(MHI_MSG_VERBOSE, "Starting inactivity timer, ret %d\n", ret_val);
 	return MHI_STATUS_SUCCESS;
 }
 
@@ -402,12 +404,12 @@ void conditional_chan_db_write(mhi_device_ctxt *mhi_dev_ctxt, u32 chan)
 MHI_STATUS process_M1_transition(mhi_device_ctxt  *mhi_dev_ctxt,
 		STATE_TRANSITION cur_work_item)
 {
+	unsigned long flags = 0;
 	mhi_log(MHI_MSG_INFO,
 			"Processing M1 state transition from state %d\n",
 			mhi_dev_ctxt->mhi_state);
-	mhi_log(MHI_MSG_INFO, "Allowing transition to M2\n");
+
 	mhi_dev_ctxt->m0_m1++;
-	mhi_dev_ctxt->mhi_state = MHI_STATE_M2;
 	mhi_log(MHI_MSG_VERBOSE,
 		"Cancelling Inactivity timer\n");
 	switch(hrtimer_try_to_cancel(&mhi_dev_ctxt->inactivity_tmr))
@@ -425,16 +427,20 @@ MHI_STATUS process_M1_transition(mhi_device_ctxt  *mhi_dev_ctxt,
 			"Timer executing and can't stop\n");
 		break;
 	}
-	wmb();
-	//TODO:  Stop xfers from occuring?
-	MHI_REG_WRITE_FIELD(mhi_dev_ctxt->mmio_addr, MHICTRL,
+	write_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
+	if (!mhi_dev_ctxt->pending_M3) {
+		mhi_dev_ctxt->mhi_state = MHI_STATE_M2;
+		mhi_log(MHI_MSG_INFO, "Allowing transition to M2\n");
+		MHI_REG_WRITE_FIELD(mhi_dev_ctxt->mmio_addr, MHICTRL,
 			MHICTRL_MHISTATE_MASK,
 			MHICTRL_MHISTATE_SHIFT,
 			MHI_STATE_M2);
-	mhi_dev_ctxt->m1_m2++;
-
+		mhi_dev_ctxt->m1_m2++;
+	}
+	write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 	return MHI_STATUS_SUCCESS;
 }
+
 MHI_STATUS process_BHI_transition(mhi_device_ctxt *mhi_dev_ctxt,
 			STATE_TRANSITION cur_work_item)
 {

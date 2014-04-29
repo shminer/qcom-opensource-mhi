@@ -140,6 +140,7 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify)
 			mhi_log(MHI_MSG_INFO,
 				"Failed to scale bus request to sleep set.\n");
 		mhi_pcie_dev->link_down_cntr++;
+		atomic_set(&mhi_dev_ctxt->data_pending, 0);
 		break;
 	case MSM_PCIE_EVENT_LINKUP:
 

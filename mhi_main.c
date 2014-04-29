@@ -377,20 +377,21 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	MHI_TRB_SET_INFO(TX_TRB_TYPE, pkt_loc, MHI_PKT_TYPE_TRANSFER);
 	MHI_TX_TRB_SET_LEN(TX_TRB_LEN, pkt_loc, buf_len);
 
+	spin_lock_irqsave(&mhi_dev_ctxt->db_write_lock[chan], flags);
 	if (likely(((MHI_STATE_M0 == mhi_dev_ctxt->mhi_state) ||
 		(MHI_STATE_M1 == mhi_dev_ctxt->mhi_state)) &&
 		(chan_ctxt->mhi_chan_state == MHI_CHAN_STATE_RUNNING))) {
-		spin_lock_irqsave(&mhi_dev_ctxt->db_write_lock[chan], flags);
 		mhi_dev_ctxt->mhi_chan_db_order[chan]++;
 		db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 			(uintptr_t)mhi_dev_ctxt->mhi_local_chan_ctxt[chan].wp);
 		MHI_WRITE_DB(mhi_dev_ctxt, mhi_dev_ctxt->channel_db_addr, chan, db_value);
-		spin_unlock_irqrestore(&mhi_dev_ctxt->db_write_lock[chan], flags);
+
 	} else {
 		mhi_log(MHI_MSG_INFO,
 			"Current MHI mhi_dev_ctxt state %d, not M0 or M1\n",
 			mhi_dev_ctxt->mhi_state);
 	}
+	spin_unlock_irqrestore(&mhi_dev_ctxt->db_write_lock[chan], flags);
 	/* If there are no clients still sending we can trigger our
 	 * inactivity timer */
 	atomic_dec(&mhi_dev_ctxt->data_pending);
@@ -934,8 +935,8 @@ MHI_STATUS mhi_client_recycle_trb(mhi_client_handle *client_handle)
 	db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 					(uintptr_t)local_ctxt->wp);
 	read_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
+	atomic_inc(&mhi_dev_ctxt->data_pending);
 	 if (mhi_dev_ctxt->link_up) {
-		atomic_inc(&mhi_dev_ctxt->data_pending);
 		mhi_assert_device_wake(mhi_dev_ctxt);
 	}
 	read_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
