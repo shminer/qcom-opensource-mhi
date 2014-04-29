@@ -130,7 +130,7 @@ MHI_STATUS mhi_init_device_ctxt(mhi_pcie_dev_info *dev_info,
 		return MHI_STATUS_ERROR;
 	}
 	(*mhi_device)->dev_info = dev_info;
-	(*mhi_device)->dev_props = dev_info->core;
+	(*mhi_device)->dev_props = &dev_info->core;
 
 	return MHI_STATUS_SUCCESS;
 

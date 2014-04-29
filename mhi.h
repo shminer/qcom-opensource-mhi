@@ -387,7 +387,7 @@ typedef struct mhi_counters {
 
 struct mhi_device_ctxt {
 	mhi_pcie_dev_info *dev_info;
-	pcie_core_info dev_props;
+	pcie_core_info *dev_props;
 	volatile u64 channel_db_addr;
 	volatile u64 event_db_addr;
 	volatile u64 cmd_db_addr;
@@ -460,8 +460,8 @@ struct mhi_device_ctxt {
 
 	u32 link_up;
 	u32 clients_probed;
+	unsigned long esoc_notif;
 	STATE_TRANSITION base_state;
-	u32 device_wake;
 };
 
 MHI_STATUS mhi_reset_all_thread_queues(mhi_device_ctxt *mhi_dev_ctxt);
@@ -551,7 +551,6 @@ MHI_STATUS validate_ev_el_addr(mhi_ring *ring, uintptr_t addr);
 
 MHI_STATUS mhi_spawn_threads(mhi_device_ctxt *mhi_dev_ctxt);
 
-void assert_device_wake(void);
 
 MHI_STATUS reset_chan_cmd(mhi_device_ctxt *mhi_dev_ctxt, mhi_cmd_pkt *cmd_pkt);
 MHI_STATUS start_chan_cmd(mhi_device_ctxt *mhi_dev_ctxt, mhi_cmd_pkt *cmd_pkt);
@@ -610,5 +609,7 @@ void ring_all_cmd_dbs(mhi_device_ctxt *mhi_dev_ctxt);
 int mhi_esoc_register(mhi_device_ctxt* mhi_dev_ctxt);
 void mhi_link_state_cb(struct msm_pcie_notify *notify);
 void mhi_notify_clients(mhi_device_ctxt *mhi_dev_ctxt, MHI_CB_REASON reason);
+int mhi_deassert_device_wake(mhi_device_ctxt *mhi_dev_ctxt);
+int mhi_assert_device_wake(mhi_device_ctxt *mhi_dev_ctxt);
 
 #endif
