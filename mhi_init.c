@@ -543,7 +543,14 @@ MHI_STATUS mhi_init_contexts(mhi_device_ctxt *mhi_device)
 		MHI_GET_EVENT_RING_INFO(EVENT_RING_MSI_VEC,
 					mhi_device->ev_ring_props[i],
 					msi_vec);
-		intmod_t = (SECONDARY_EVENT_RING == i) ? 10 : 0;
+		switch (i) {
+		case SECONDARY_EVENT_RING:
+			intmod_t = 10;
+			break;
+		case TERTIARY_EVENT_RING:
+			intmod_t = 6;
+			break;
+		}
 		event_ring_index = mhi_device->alloced_ev_rings[i];
 		event_ctxt = &mhi_ctrl->mhi_ec_list[event_ring_index];
 		local_event_ctxt =
