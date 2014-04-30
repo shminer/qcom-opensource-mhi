@@ -125,12 +125,12 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify)
 			mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
 				"Timer executing and can't stop\n");
 		}
-		mhi_dev_ctxt->link_up = 0;
 		mhi_log(MHI_MSG_CRITICAL,
 			"Informing clients of MHI that link is down\n");
 		write_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
+		mhi_dev_ctxt->link_up = 0;
 		mhi_dev_ctxt->mhi_state = MHI_STATE_RESET;
-		ret_val = gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 0);
+		ret_val = mhi_deassert_device_wake(mhi_dev_ctxt);
 		write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 		//mhi_notify_clients(mhi_dev_ctxt, MHI_CB_MHI_DISABLED);
 		mhi_dev_ctxt->mhi_initialized = 0;
@@ -142,7 +142,7 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify)
 		mhi_pcie_dev->link_down_cntr++;
 		break;
 	case MSM_PCIE_EVENT_LINKUP:
-		ret_val = gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
+
 		if (0 == mhi_pcie_dev->link_up_cntr) {
 		mhi_log(MHI_MSG_INFO,
 			"Initializing MHI for the first time\n");
@@ -151,8 +151,9 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify)
 			pci_set_master(mhi_pcie_dev->pcie_device);
 		} else {
 			mhi_log(MHI_MSG_INFO,
-		"Received Link Up Callback\n");
+				"Received Link Up Callback\n");
 		}
+		mhi_assert_device_wake(mhi_dev_ctxt);
 		mhi_dev_ctxt->link_up = 1;
 		r =
 		msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client, 1);
@@ -187,6 +188,8 @@ int mhi_ssr_notify_cb(struct notifier_block *nb,
 	mhi_log(MHI_MSG_VERBOSE,
 		"Received Subsystem event 0x%lx, from esoc %p\n",
 		action, data);
+	if (NULL != mhi_dev_ctxt)
+		mhi_dev_ctxt->esoc_notif = action;
 	switch (action) {
 	case SUBSYS_AFTER_POWERUP:
 		mhi_log(MHI_MSG_VERBOSE,
@@ -200,7 +203,7 @@ int mhi_ssr_notify_cb(struct notifier_block *nb,
 		 * no more dbs can be written to the device */
 		mhi_dev_ctxt->link_up = 0;
 		mhi_dev_ctxt->mhi_state = MHI_STATE_RESET;
-		ret_val = gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
+		ret_val = mhi_assert_device_wake(mhi_dev_ctxt);
 		write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 		mhi_notify_clients(mhi_dev_ctxt, MHI_CB_MHI_DISABLED);
 		mhi_dev_ctxt->mhi_initialized = 0;

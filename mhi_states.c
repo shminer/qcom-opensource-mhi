@@ -302,7 +302,7 @@ MHI_STATUS process_M0_transition(mhi_device_ctxt *mhi_dev_ctxt,
 		read_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
 		mhi_dev_ctxt->mhi_state = MHI_STATE_M0;
 		atomic_inc(&mhi_dev_ctxt->data_pending);
-		gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
+		mhi_assert_device_wake(mhi_dev_ctxt);
 		read_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 
 		ring_all_ev_dbs(mhi_dev_ctxt);
@@ -408,20 +408,20 @@ MHI_STATUS process_M1_transition(mhi_device_ctxt  *mhi_dev_ctxt,
 	mhi_log(MHI_MSG_INFO, "Allowing transition to M2\n");
 	mhi_dev_ctxt->m0_m1++;
 	mhi_dev_ctxt->mhi_state = MHI_STATE_M2;
-	mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+	mhi_log(MHI_MSG_VERBOSE,
 		"Cancelling Inactivity timer\n");
 	switch(hrtimer_try_to_cancel(&mhi_dev_ctxt->inactivity_tmr))
 	{
 	case 0:
-		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+		mhi_log(MHI_MSG_VERBOSE,
 			"Timer was not active\n");
 		break;
 	case 1:
-		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+		mhi_log(MHI_MSG_VERBOSE,
 			"Timer was active\n");
 		break;
 	case -1:
-		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+		mhi_log(MHI_MSG_VERBOSE,
 			"Timer executing and can't stop\n");
 		break;
 	}
@@ -569,15 +569,15 @@ MHI_STATUS process_M3_transition(mhi_device_ctxt *mhi_dev_ctxt,
 	switch(hrtimer_try_to_cancel(&mhi_dev_ctxt->inactivity_tmr))
 	{
 	case 0:
-		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+		mhi_log(MHI_MSG_VERBOSE,
 			"Timer was not active\n");
 		break;
 	case 1:
-		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+		mhi_log(MHI_MSG_VERBOSE,
 			"Timer was active\n");
 		break;
 	case -1:
-		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+		mhi_log(MHI_MSG_VERBOSE,
 			"Timer executing and can't stop\n");
 	}
 	write_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
@@ -636,7 +636,7 @@ MHI_STATUS process_AMSS_transition(mhi_device_ctxt *mhi_dev_ctxt,
 	mhi_log(MHI_MSG_INFO, "Processing AMSS state transition\n");
 	write_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
 	atomic_inc(&mhi_dev_ctxt->data_pending);
-	gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
+	mhi_assert_device_wake(mhi_dev_ctxt);
 	write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 	for (chan = 0; chan <= MHI_MAX_CHANNELS; ++chan) {
 		if (VALID_CHAN_NR(chan)) {

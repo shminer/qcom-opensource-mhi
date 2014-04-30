@@ -73,7 +73,7 @@ int mhi_suspend(struct pci_dev *pcie_dev, pm_message_t state)
 			"Failed to put device in D3 hot ret %d\n", ret_val);
 		return MHI_STATUS_ERROR;
 	}
-	gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 0);
+	mhi_deassert_device_wake(mhi_dev_ctxt);
 	return 0;
 }
 
@@ -151,17 +151,21 @@ enum hrtimer_restart mhi_initiate_M1(struct hrtimer *timer)
 			(0 == mhi_dev_ctxt->pending_M3) &&
 			mhi_dev_ctxt->mhi_initialized) {
 		mhi_dev_ctxt->mhi_state = MHI_STATE_M1;
-		ret_val = gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 0);
+		ret_val = mhi_deassert_device_wake(mhi_dev_ctxt);
 		mhi_dev_ctxt->m0_m1++;
 		if (ret_val)
 			mhi_log(MHI_MSG_ERROR | MHI_DBG_POWER,
 				"Could not set DEVICE WAKE GPIO LOW\n");
 	}
 	write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
-	curr_time = ktime_get();
-	timer_inc = ktime_set(0, MHI_M1_ENTRY_DELAY_MS * 1E6L);
-	hrtimer_forward(timer, curr_time, timer_inc);
-	return HRTIMER_RESTART;
+	if (mhi_dev_ctxt->mhi_state == MHI_STATE_M0 ||
+	    mhi_dev_ctxt->mhi_state == MHI_STATE_M1) {
+		curr_time = ktime_get();
+		timer_inc = ktime_set(0, MHI_M1_ENTRY_DELAY_MS * 1E6L);
+		hrtimer_forward(timer, curr_time, timer_inc);
+		return HRTIMER_RESTART;
+	}
+	return HRTIMER_NORESTART;
 }
 
 int mhi_initiate_M0(mhi_device_ctxt *mhi_dev_ctxt)
@@ -179,7 +183,7 @@ int mhi_initiate_M0(mhi_device_ctxt *mhi_dev_ctxt)
 			r);
 	mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
 			"Setting WAKE GPIO HIGH.\n");
-	ret_val = gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
+	ret_val = mhi_assert_device_wake(mhi_dev_ctxt);
 	if (ret_val)
 		mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
 			"Failed to set DEVICE WAKE GPIO ret 0x%d.\n", ret_val);
@@ -235,14 +239,13 @@ int mhi_initiate_M3(mhi_device_ctxt *mhi_dev_ctxt)
 
 	mhi_log(MHI_MSG_INFO | MHI_DBG_POWER, "Entering...\n");
 
-
 	if (ret_val)
 		mhi_log(MHI_MSG_CRITICAL,
 			"Could not set bus frequency ret: %d\n",
 			ret_val);
 	write_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
 	mhi_dev_ctxt->pending_M3 = 1;
-	gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
+	mhi_assert_device_wake(mhi_dev_ctxt);
 	write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 
 	if (mhi_dev_ctxt->mhi_state == MHI_STATE_M2)
@@ -301,7 +304,7 @@ int mhi_initiate_M3(mhi_device_ctxt *mhi_dev_ctxt)
 		ret_val = 0;
 		break;
 	}
-	gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 0);
+	mhi_deassert_device_wake(mhi_dev_ctxt);
 	return ret_val;
 }
 
