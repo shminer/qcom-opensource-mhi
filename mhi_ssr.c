@@ -95,6 +95,7 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify)
 {
 	unsigned long flags;
 	MHI_STATUS ret_val;
+	int r;
 	mhi_pcie_dev_info *mhi_pcie_dev = notify->data;
 	mhi_device_ctxt *mhi_dev_ctxt = NULL;
 	mhi_log(MHI_MSG_INFO, "Entered\n");
@@ -108,6 +109,8 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify)
 	case MSM_PCIE_EVENT_LINKDOWN:
 		mhi_log(MHI_MSG_INFO,
 			"Received Link Down Callback\n");
+		if (NULL == mhi_dev_ctxt)
+			return;
 		mhi_dev_ctxt->link_up = 0;
 		mhi_log(MHI_MSG_CRITICAL,
 			"Informing clients of MHI that link is down\n");
@@ -117,6 +120,11 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify)
 		write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 		//mhi_notify_clients(mhi_dev_ctxt, MHI_CB_MHI_DISABLED);
 		mhi_dev_ctxt->mhi_initialized = 0;
+		r =
+		msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client, 0);
+		if (r)
+			mhi_log(MHI_MSG_INFO,
+				"Failed to scale bus request to sleep set.\n");
 		mhi_pcie_dev->link_down_cntr++;
 		break;
 	case MSM_PCIE_EVENT_LINKUP:
@@ -132,6 +140,11 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify)
 		"Received Link Up Callback\n");
 		}
 		mhi_dev_ctxt->link_up = 1;
+		r =
+		msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client, 1);
+		if (r)
+		mhi_log(MHI_MSG_INFO,
+			"Failed to scale bus request to active set.\n");
 		ret_val = mhi_init_state_transition(mhi_dev_ctxt,
 				mhi_dev_ctxt->base_state);
 		if (MHI_STATUS_SUCCESS != ret_val) {

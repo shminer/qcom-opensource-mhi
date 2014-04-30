@@ -99,7 +99,6 @@ int mhi_state_change_thread(void *ctxt)
 		}
 		mutex_lock(work_q->q_mutex);
 		cur_work_item = *(STATE_TRANSITION *)(state_change_q->rp);
-		*(STATE_TRANSITION *)(state_change_q->rp) = 0xDEADBEEF;
 		ret_val = ctxt_del_element(&work_q->q_info, NULL);
 		MHI_ASSERT(ret_val == MHI_STATUS_SUCCESS);
 		mutex_unlock(work_q->q_mutex);
@@ -301,6 +300,7 @@ MHI_STATUS process_M0_transition(mhi_device_ctxt *mhi_dev_ctxt,
 	if (mhi_dev_ctxt->mhi_initialized) {
 		/* Bump up the vote for pending data */
 		read_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
+		mhi_dev_ctxt->mhi_state = MHI_STATE_M0;
 		atomic_inc(&mhi_dev_ctxt->data_pending);
 		gpio_direction_output(MHI_DEVICE_WAKE_GPIO, 1);
 		read_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
