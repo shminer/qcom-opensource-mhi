@@ -159,7 +159,8 @@ enum hrtimer_restart mhi_initiate_M1(struct hrtimer *timer)
 	}
 	write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 	if (mhi_dev_ctxt->mhi_state == MHI_STATE_M0 ||
-	    mhi_dev_ctxt->mhi_state == MHI_STATE_M1) {
+	    mhi_dev_ctxt->mhi_state == MHI_STATE_M1 ||
+	    mhi_dev_ctxt->mhi_state == MHI_STATE_READY) {
 		curr_time = ktime_get();
 		timer_inc = ktime_set(0, MHI_M1_ENTRY_DELAY_MS * 1E6L);
 		hrtimer_forward(timer, curr_time, timer_inc);
