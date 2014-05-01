@@ -421,8 +421,16 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 		mhi_dev_ctxt->mhi_chan_db_order[chan]++;
 		db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 			(uintptr_t)mhi_dev_ctxt->mhi_local_chan_ctxt[chan].wp);
+		if (IS_HARDWARE_CHANNEL(chan) && (chan % 2)) {
+			if ((mhi_dev_ctxt->mhi_chan_cntr[chan].pkts_xferd %
+						MHI_XFER_DB_INTERVAL) == 0) {
+				MHI_WRITE_DB(mhi_dev_ctxt,
+						mhi_dev_ctxt->channel_db_addr,
+						chan, db_value);
+			}
+		} else {
 		MHI_WRITE_DB(mhi_dev_ctxt, mhi_dev_ctxt->channel_db_addr, chan, db_value);
-
+		}
 	} else {
 		mhi_log(MHI_MSG_INFO,
 			"Current MHI mhi_dev_ctxt state %d, not M0 or M1\n",
@@ -749,8 +757,12 @@ MHI_STATUS recycle_trb_and_ring(mhi_device_ctxt *mhi_dev_ctxt,
 			lock = &mhi_dev_ctxt->mhi_ev_spinlock_list[ring_index];
 			spin_lock_irqsave(lock, flags);
 			mhi_dev_ctxt->mhi_ev_db_order[ring_index] = 1;
+			if ((mhi_dev_ctxt->ev_counter[ring_index] %
+						MHI_EV_DB_INTERVAL) == 0) {
 				MHI_WRITE_DB(mhi_dev_ctxt, mhi_dev_ctxt->event_db_addr,
 						ring_index, db_value);
+			}
+			mhi_dev_ctxt->ev_counter[ring_index]++;
 			spin_unlock_irqrestore(lock, flags);
 			break;
 		}
