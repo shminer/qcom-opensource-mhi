@@ -54,6 +54,9 @@
 #include <linux/of_device.h>
 #include <linux/of_platform.h>
 #include <linux/of_gpio.h>
+#include <linux/msm-bus.h>
+#include <linux/cpu.h>
+#include <linux/irq.h>
 
 extern MHI_DEBUG_LEVEL mhi_msg_lvl;
 extern MHI_DEBUG_CLASS mhi_msg_class;
