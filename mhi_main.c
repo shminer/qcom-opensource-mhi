@@ -77,39 +77,54 @@ mhi_pcie_read_ep_config_err:
 	return -EIO;
 }
 
+static void mhi_move_interrupts(mhi_device_ctxt *mhi_dev_ctxt, u32 cpu)
+{
+	u32 irq_to_affin = 0;
+
+	mhi_log(MHI_MSG_INFO, "Moving irqs to core %d, moved %d times\n",
+		cpu, mhi_dev_ctxt->nr_irq_migrations++);
+
+	MHI_GET_EVENT_RING_INFO(EVENT_RING_MSI_VEC,
+	mhi_dev_ctxt->ev_ring_props[TERTIARY_EVENT_RING], irq_to_affin);
+	irq_to_affin += mhi_dev_ctxt->dev_props->irq_base;
+	mhi_log(MHI_MSG_VERBOSE, "Moving irq %d, to core %d\n",
+				irq_to_affin, cpu);
+	irq_set_affinity(irq_to_affin, get_cpu_mask(cpu));
+	MHI_GET_EVENT_RING_INFO(EVENT_RING_MSI_VEC,
+	mhi_dev_ctxt->ev_ring_props[SECONDARY_EVENT_RING], irq_to_affin);
+	irq_to_affin += mhi_dev_ctxt->dev_props->irq_base;
+	mhi_log(MHI_MSG_VERBOSE, "Moving irq %d, to core %d\n",
+				irq_to_affin, cpu);
+	irq_set_affinity(irq_to_affin, get_cpu_mask(cpu));
+}
+
 int mhi_cpu_notifier_cb(struct notifier_block *nfb, unsigned long action,
 			void *hcpu)
 {
 	u32 cpu = (u32)hcpu;
-	u32 irq_to_affin = 0;
 	mhi_device_ctxt *mhi_dev_ctxt = container_of(nfb,
 						mhi_device_ctxt,
 						mhi_cpu_notifier);
 	if (NULL == mhi_dev_ctxt)
 		return NOTIFY_BAD;
-	if (action == CPU_ONLINE) {
-		switch(cpu) {
-		case 0:
-			break;
-		default:
-			mhi_log(MHI_MSG_INFO,
-				"Moving irqs to core %d, moved %d times\n",
-				cpu, mhi_dev_ctxt->nr_irq_migrations++);
 
-			MHI_GET_EVENT_RING_INFO(EVENT_RING_MSI_VEC,
-			mhi_dev_ctxt->ev_ring_props[TERTIARY_EVENT_RING], irq_to_affin);
-			irq_to_affin += mhi_dev_ctxt->dev_props->irq_base;
-			mhi_log(MHI_MSG_VERBOSE, "Moving irq %d, to core %d\n",
-						irq_to_affin, cpu);
-			irq_set_affinity(irq_to_affin, get_cpu_mask(cpu));
-			MHI_GET_EVENT_RING_INFO(EVENT_RING_MSI_VEC,
-			mhi_dev_ctxt->ev_ring_props[SECONDARY_EVENT_RING], irq_to_affin);
-			irq_to_affin += mhi_dev_ctxt->dev_props->irq_base;
-			mhi_log(MHI_MSG_VERBOSE, "Moving irq %d, to core %d\n",
-						irq_to_affin, cpu);
-			irq_set_affinity(irq_to_affin, get_cpu_mask(cpu));
+	switch(action) {
+	case CPU_ONLINE:
+		if (cpu > 0)
+			mhi_move_interrupts(mhi_dev_ctxt, cpu);
 		break;
+
+	case CPU_DEAD:
+		for_each_online_cpu(cpu) {
+			if (cpu > 0) {
+				mhi_move_interrupts(mhi_dev_ctxt, cpu);
+				break;
+			}
 		}
+		break;
+
+	default:
+		break;
 	}
 	return NOTIFY_OK;
 }
