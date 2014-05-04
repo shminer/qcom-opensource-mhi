@@ -248,6 +248,10 @@ int mhi_startup_thread(void *ctxt)
 	}
 	/* Fire off the state transition  thread */
 
+	if (MHI_STATUS_SUCCESS != mhi_reg_notifiers(mhi_pcie_dev->mhi_ctxt)) {
+		mhi_log(MHI_MSG_ERROR, "Failed to register for notifiers\n");
+		return MHI_STATUS_ERROR;
+	}
 	mhi_log(MHI_MSG_INFO,
 			"Finished all driver probing returning ret_val %d.\n",
 			ret_val);
