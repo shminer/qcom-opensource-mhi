@@ -451,7 +451,7 @@ struct mhi_device_ctxt {
 	hrtimer inactivity_tmr;
 	ktime_t inactivity_timeout;
 	mhi_counters mhi_chan_cntr[MHI_MAX_CHANNELS];
-	u32 ev_counter[EVENT_RINGS_ALLOCATED];
+	u32 ev_counter[MHI_MAX_CHANNELS];
 	struct msm_bus_scale_pdata bus_scale_table;
 	struct msm_bus_vectors bus_vectors[2];
 	struct msm_bus_paths usecase[2];
