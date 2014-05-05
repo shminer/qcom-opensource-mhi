@@ -28,6 +28,7 @@
 #include <linux/sched.h>
 #include <linux/platform_device.h>
 #include <linux/tty.h>
+#include <linux/delay.h>
 
 #define MIN(_x, _y)(((_x) < (_y)) ? (_x) : (_y))
 #define MHI_DEV_NODE_NAME_LEN 13
@@ -126,6 +127,7 @@ typedef struct uci_client {
 	u8 local_tiocm;
 	atomic_t ref_count;
 	int mhi_status;
+	atomic_t out_pkt_pend_ack;
 } uci_client;
 
 typedef struct mhi_uci_ctxt_t {
@@ -144,7 +146,7 @@ typedef struct mhi_uci_ctxt_t {
 } mhi_uci_ctxt_t;
 
 void uci_xfer_cb(mhi_cb_info *client_info);
-int mhi_uci_send_packet(mhi_client_handle *client_handle, void *buf,
+int mhi_uci_send_packet(mhi_client_handle **client_handle, void *buf,
 		u32 size, u32 chan);
 MHI_STATUS mhi_init_inbound(mhi_client_handle *client_handle,
 		MHI_CLIENT_CHANNEL chan);
