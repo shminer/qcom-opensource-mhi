@@ -79,6 +79,7 @@ typedef struct mhi_pcie_dev_info {
 	bhi_ctxt_t bhi_ctxt;
 	u32 link_down_cntr;
 	u32 link_up_cntr;
+
 } mhi_pcie_dev_info;
 
 typedef struct mhi_pcie_devices {
@@ -458,6 +459,8 @@ struct mhi_device_ctxt {
 	struct esoc_desc *esoc_handle;
 	void *esoc_ssr_handle;
 
+	struct notifier_block mhi_cpu_notifier;
+	u32 nr_irq_migrations;
 	u32 link_up;
 	u32 clients_probed;
 	unsigned long esoc_notif;
@@ -611,5 +614,8 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify);
 void mhi_notify_clients(mhi_device_ctxt *mhi_dev_ctxt, MHI_CB_REASON reason);
 int mhi_deassert_device_wake(mhi_device_ctxt *mhi_dev_ctxt);
 int mhi_assert_device_wake(mhi_device_ctxt *mhi_dev_ctxt);
+MHI_STATUS mhi_reg_notifiers(mhi_device_ctxt *mhi_dev_ctxt);
+int mhi_cpu_notifier_cb(struct notifier_block *nfb, unsigned long action,
+			void *hcpu);
 
 #endif

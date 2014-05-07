@@ -132,6 +132,7 @@ MHI_STATUS mhi_init_device_ctxt(mhi_pcie_dev_info *dev_info,
 	(*mhi_device)->dev_info = dev_info;
 	(*mhi_device)->dev_props = &dev_info->core;
 
+
 	return MHI_STATUS_SUCCESS;
 
 }
@@ -726,4 +727,16 @@ MHI_STATUS mhi_init_timers(mhi_device_ctxt *mhi_dev_ctxt)
 	mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
 		"Starting Inactivity timer\n");
 	return MHI_STATUS_SUCCESS;
+}
+MHI_STATUS mhi_reg_notifiers(mhi_device_ctxt *mhi_dev_ctxt)
+{
+	u32 ret_val;
+	if (NULL == mhi_dev_ctxt)
+		return MHI_STATUS_ERROR;
+	mhi_dev_ctxt->mhi_cpu_notifier.notifier_call = mhi_cpu_notifier_cb;
+	ret_val = register_cpu_notifier(&mhi_dev_ctxt->mhi_cpu_notifier);
+	if (ret_val)
+		return MHI_STATUS_ERROR;
+	else
+		return MHI_STATUS_SUCCESS;
 }
