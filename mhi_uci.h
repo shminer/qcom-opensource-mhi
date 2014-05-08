@@ -121,6 +121,7 @@ typedef struct uci_client {
 	size_t pending_data;
 	mhi_uci_ctxt_t *uci_ctxt;
 	wait_queue_head_t read_wait_queue;
+	wait_queue_head_t write_wait_queue;
 	atomic_t avail_pkts;
 	struct device *dev;
 	u32 dev_node_enabled;

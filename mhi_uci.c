@@ -123,8 +123,17 @@ static unsigned int mhi_uci_client_poll(struct file *file, poll_table *wait)
 	if (NULL == uci_handle)
 		return -ENODEV;
 	poll_wait(file, &uci_handle->read_wait_queue, wait);
-	if (atomic_read(&uci_handle->avail_pkts) > 0)
+	poll_wait(file, &uci_handle->write_wait_queue, wait);
+	if (atomic_read(&uci_handle->avail_pkts) > 0) {
+		mhi_uci_log(UCI_DBG_VERBOSE,
+		"Client can read chan %d\n", uci_handle->in_chan);
 		mask |= POLLIN | POLLRDNORM;
+	}
+	if (get_free_trbs(uci_handle->outbound_handle)) {
+		mhi_uci_log(UCI_DBG_VERBOSE,
+		"Client can write chan %d\n", uci_handle->out_chan);
+		mask |= POLLOUT | POLLWRNORM;
+	}
 
 	mhi_uci_log(UCI_DBG_VERBOSE,
 		"Client attempted to poll chan 0x%x, returning mask 0x%x\n",
@@ -375,8 +384,17 @@ static ssize_t mhi_uci_client_write(struct file *file,
 	}
 	chan = uci_handle->out_chan;
 	mutex_lock(&uci_handle->uci_ctxt->client_chan_lock[chan]);
+	while (ret_val == 0) {
 	ret_val = mhi_uci_send_packet(&uci_handle->outbound_handle,
 			(void *)buf, count, 1);
+		if (0 == ret_val) {
+			mhi_uci_log(UCI_DBG_VERBOSE,
+			"No descriptors available, did we poll, chan %d?\n",
+			chan);
+			wait_event_interruptible(uci_handle->write_wait_queue,
+			get_free_trbs(uci_handle->outbound_handle) > 0);
+		}
+	}
 	mutex_unlock(&uci_handle->uci_ctxt->client_chan_lock[chan]);
 	return ret_val;
 }
@@ -419,6 +437,7 @@ int mhi_uci_probe(struct platform_device *dev)
 		curr_client = &mhi_uci_ctxt.client_handle_list[i];
 		init_handle = &curr_client->inbound_handle;
 		init_waitqueue_head(&curr_client->read_wait_queue);
+		init_waitqueue_head(&curr_client->write_wait_queue);
 		curr_client->out_chan = i * 2;
 		curr_client->in_chan = i * 2 + 1;
 		curr_client->client_index = i;
@@ -725,6 +744,8 @@ void uci_xfer_cb(mhi_cb_info *cb_info)
 				chan_nr,
 				atomic_read(&uci_handle->out_pkt_pend_ack));
 			atomic_dec(&uci_handle->out_pkt_pend_ack);
+			if (get_free_trbs(uci_handle->outbound_handle))
+				wake_up(&uci_handle->write_wait_queue);
 		}
 		break;
 	default:
