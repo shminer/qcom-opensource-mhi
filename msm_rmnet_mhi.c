@@ -262,7 +262,7 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 			pr_err("%s: DMA mapping error in polling function",
 			       __func__);
 			/* TODO: Handle error */
-			dev_kfree_skb_irq(skb);
+			kfree_skb(skb);
 			break;
 		}
 
@@ -275,7 +275,7 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 			       __func__);
 			dma_unmap_single(&(dev->dev), dma_addr, skb->len,
 							 DMA_FROM_DEVICE);
-			dev_kfree_skb_irq(skb);
+			kfree_skb(skb);
 			break;
 		}
 
@@ -290,7 +290,7 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 			dma_unmap_single(&(dev->dev), dma_addr, skb->len,
 							 DMA_FROM_DEVICE);
 
-			dev_kfree_skb_irq(skb);
+			kfree_skb(skb);
 			break;
 		}
 
@@ -384,7 +384,7 @@ void rmnet_mhi_tx_cb(mhi_cb_info *cb_info)
 			else {
 				dma_unmap_single(&(dev->dev), dma_addr,
 						 skb->len, DMA_TO_DEVICE);
-				dev_kfree_skb_irq(skb);
+				kfree_skb(skb);
 			}
 			burst_counter++;
 
