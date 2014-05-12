@@ -61,9 +61,9 @@
 extern MHI_DEBUG_LEVEL mhi_msg_lvl;
 extern MHI_DEBUG_CLASS mhi_msg_class;
 
-#define MHI_ASSERT(_x) if (!(_x)) {\
-	pr_err("ASSERT- Failure in %s:%d/%s()!\n",\
-			__FILE__, __LINE__, __func__); \
+#define MHI_ASSERT(_x, _msg) if (!(_x)) {\
+	pr_err("ASSERT- %s : Failure in %s:%d/%s()!\n",\
+			_msg,__FILE__, __LINE__, __func__); \
 	panic("ASSERT"); \
 }
 
