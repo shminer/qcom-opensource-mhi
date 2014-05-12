@@ -86,7 +86,8 @@ int mhi_state_change_thread(void *ctxt)
 			return 0;
 			break;
 		default:
-			MHI_ASSERT(work_q->q_info.rp != work_q->q_info.wp);
+			MHI_ASSERT(work_q->q_info.rp != work_q->q_info.wp,
+				"Could not retrieve state element from work queue\n");
 			break;
 		}
 
@@ -100,7 +101,8 @@ int mhi_state_change_thread(void *ctxt)
 		mutex_lock(work_q->q_mutex);
 		cur_work_item = *(STATE_TRANSITION *)(state_change_q->rp);
 		ret_val = ctxt_del_element(&work_q->q_info, NULL);
-		MHI_ASSERT(ret_val == MHI_STATUS_SUCCESS);
+		MHI_ASSERT(ret_val == MHI_STATUS_SUCCESS,
+				"Failed to delete element from STT workqueue\n");
 		mutex_unlock(work_q->q_mutex);
 		ret_val = process_stt_work_item(mhi_dev_ctxt, cur_work_item);
 		if (ret_val != MHI_STATUS_SUCCESS)
@@ -209,7 +211,8 @@ MHI_STATUS mhi_init_state_transition(mhi_device_ctxt *mhi_dev_ctxt,
 	*(STATE_TRANSITION *)stt_ring->wp = new_state;
 	ret_val = ctxt_add_element(stt_ring, (void **)&cur_work_item);
 	wmb();
-	MHI_ASSERT(MHI_STATUS_SUCCESS == ret_val);
+	MHI_ASSERT(MHI_STATUS_SUCCESS == ret_val,
+			"Failed to add selement to STT workqueue\n");
 	mutex_unlock(work_q->q_mutex);
 	wake_up_interruptible(mhi_dev_ctxt->state_change_event_handle);
 	return ret_val;
@@ -279,7 +282,7 @@ MHI_STATUS process_stt_work_item(mhi_device_ctxt  *mhi_dev_ctxt,
 	default:
 		mhi_log(MHI_MSG_ERROR,
 				"Unrecongized state: %d\n", cur_work_item);
-		MHI_ASSERT(0);
+		MHI_ASSERT(0, "Unrecognized state transition\n");
 		break;
 	}
 	return ret_val;
@@ -311,6 +314,12 @@ MHI_STATUS process_M0_transition(mhi_device_ctxt *mhi_dev_ctxt,
 		ring_all_cmd_dbs(mhi_dev_ctxt);
 		atomic_dec(&mhi_dev_ctxt->data_pending);
 	}
+	ret_val  =
+	msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client, 1);
+	if (ret_val)
+		mhi_log(MHI_MSG_CRITICAL,
+			"Could not set bus frequency ret: %d\n",
+			ret_val);
 	wake_up_interruptible(mhi_dev_ctxt->M0_event);
 	ret_val = hrtimer_start(&mhi_dev_ctxt->inactivity_tmr,
 				mhi_dev_ctxt->inactivity_timeout,
@@ -405,6 +414,7 @@ MHI_STATUS process_M1_transition(mhi_device_ctxt  *mhi_dev_ctxt,
 		STATE_TRANSITION cur_work_item)
 {
 	unsigned long flags = 0;
+	int ret_val = 0;
 	mhi_log(MHI_MSG_INFO,
 			"Processing M1 state transition from state %d\n",
 			mhi_dev_ctxt->mhi_state);
@@ -438,6 +448,11 @@ MHI_STATUS process_M1_transition(mhi_device_ctxt  *mhi_dev_ctxt,
 		mhi_dev_ctxt->m1_m2++;
 	}
 	write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
+	ret_val  =
+		msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client,
+							0);
+	if (ret_val)
+		mhi_log(MHI_MSG_INFO, "Failed to update bus request\n");
 	return MHI_STATUS_SUCCESS;
 }
 
