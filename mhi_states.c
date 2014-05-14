@@ -376,14 +376,18 @@ void ring_all_cmd_dbs(mhi_device_ctxt *mhi_dev_ctxt)
 {
 	struct mutex *cmd_mutex = NULL;
 	u64 db_value;
+	u64 rp = 0;
+	mhi_ring *local_ctxt = NULL;
 	mhi_log(MHI_MSG_VERBOSE, "Ringing chan dbs\n");
 	cmd_mutex = &mhi_dev_ctxt->mhi_cmd_mutex_list[PRIMARY_CMD_RING];
 	/* Write the cmd ring */
 	mhi_dev_ctxt->cmd_ring_order = 0;
 	mutex_lock(cmd_mutex);
+	local_ctxt = &mhi_dev_ctxt->mhi_local_cmd_ctxt[PRIMARY_CMD_RING];
+	rp = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info, (uintptr_t)local_ctxt->rp);
 	db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 			(uintptr_t)mhi_dev_ctxt->mhi_local_cmd_ctxt[0].wp);
-	if (0 == mhi_dev_ctxt->cmd_ring_order)
+	if (0 == mhi_dev_ctxt->cmd_ring_order && rp != db_value)
 		MHI_WRITE_DB(mhi_dev_ctxt, mhi_dev_ctxt->cmd_db_addr, 0, db_value);
 	mhi_dev_ctxt->cmd_ring_order = 0;
 	mutex_unlock(cmd_mutex);
