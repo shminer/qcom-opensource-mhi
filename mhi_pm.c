@@ -176,12 +176,6 @@ int mhi_initiate_M0(mhi_device_ctxt *mhi_dev_ctxt)
 	mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
 			"Initializing state transiton to M0\n");
 
-	r =
-		msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client, 1);
-	if (r)
-		mhi_log(MHI_MSG_CRITICAL,
-			"Could not set bus frequency ret: %d\n",
-			r);
 	mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
 			"Setting WAKE GPIO HIGH.\n");
 	ret_val = mhi_assert_device_wake(mhi_dev_ctxt);

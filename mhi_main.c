@@ -390,7 +390,8 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 		mhi_log(MHI_MSG_CRITICAL, "Bad input args\n");
 		return MHI_STATUS_ERROR;
 	}
-	MHI_ASSERT(VALID_BUF(buf, buf_len));
+	MHI_ASSERT(VALID_BUF(buf, buf_len),
+			"Client buffer is of invalid length\n");
 	mhi_dev_ctxt = client_handle->mhi_dev_ctxt;
 	chan = client_handle->chan;
 	chan_ctxt = &mhi_dev_ctxt->mhi_ctrl_seg->mhi_cc_list[chan];
@@ -1000,14 +1001,13 @@ MHI_STATUS mhi_client_recycle_trb(mhi_client_handle *client_handle)
 					(uintptr_t)local_ctxt->wp);
 	read_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
 	atomic_inc(&mhi_dev_ctxt->data_pending);
-	 if (mhi_dev_ctxt->link_up) {
+	 if (mhi_dev_ctxt->link_up)
 		mhi_assert_device_wake(mhi_dev_ctxt);
-	}
-	read_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 	if (MHI_STATE_M0 == mhi_dev_ctxt->mhi_state ||
 	    MHI_STATE_M1 == mhi_dev_ctxt->mhi_state)
 		MHI_WRITE_DB(mhi_dev_ctxt, mhi_dev_ctxt->channel_db_addr, chan, db_value);
 	atomic_dec(&mhi_dev_ctxt->data_pending);
+	read_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 	mhi_dev_ctxt->mhi_chan_cntr[chan].pkts_xferd++;
 	mutex_unlock(chan_mutex);
 	return ret_val;
