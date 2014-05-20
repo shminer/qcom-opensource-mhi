@@ -37,6 +37,7 @@
 #include <linux/jiffies.h>
 #include <linux/sysfs.h>
 #include <linux/hrtimer.h>
+#include <linux/ipc_logging.h>
 #include <linux/spinlock_types.h>
 #include <linux/pm.h>
 #include <mach/msm_pcie.h>
@@ -59,8 +60,10 @@
 #include <linux/irq.h>
 
 extern MHI_DEBUG_LEVEL mhi_msg_lvl;
+extern MHI_DEBUG_LEVEL mhi_ipc_log_lvl;
 extern MHI_DEBUG_CLASS mhi_msg_class;
 
+extern void *mhi_ipc_log;
 #define MHI_ASSERT(_x, _msg) if (!(_x)) {\
 	pr_err("ASSERT- %s : Failure in %s:%d/%s()!\n",\
 			_msg,__FILE__, __LINE__, __func__); \
@@ -70,6 +73,9 @@ extern MHI_DEBUG_CLASS mhi_msg_class;
 #define mhi_log(_msg_lvl, _msg, ...) do { \
 		if ((_msg_lvl) >= mhi_msg_lvl) \
 			pr_info("[%s] " _msg, __func__, ##__VA_ARGS__);\
+		if (mhi_ipc_log && ((_msg_lvl) >= mhi_ipc_log_lvl))	\
+			ipc_log_string(mhi_ipc_log,			\
+			       "[%s] " _msg, __func__, ##__VA_ARGS__);	\
 } while (0)
 
 #define pcie_read(base, offset)	 readl_relaxed((volatile void *) \
