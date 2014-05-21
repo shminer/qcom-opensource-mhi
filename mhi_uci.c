@@ -66,7 +66,7 @@ static long mhi_uci_ctl_ioctl(struct file *file, unsigned int cmd,
 		return -ENODEV;
 	}
 	mhi_uci_log(UCI_DBG_VERBOSE,
-			"Attempting to dtr cmd 0x%x arg 0x%lx for chan 0x%x0\n",
+			"Attempting to dtr cmd 0x%x arg 0x%lx for chan %d\n",
 			cmd, arg, uci_handle->out_chan);
 
 	switch(cmd) {
@@ -79,7 +79,7 @@ static long mhi_uci_ctl_ioctl(struct file *file, unsigned int cmd,
 		if (0 != copy_from_user(&set_val, (void *)arg, sizeof(set_val)))
 			return -ENOMEM;
 		mhi_uci_log(UCI_DBG_VERBOSE,
-			"Attempting to set cmd 0x%x arg 0x%x for chan 0x%x0\n",
+			"Attempting to set cmd 0x%x arg 0x%x for chan %d\n",
 			cmd, set_val, uci_handle->out_chan);
 		ret_val = mhi_uci_tiocm_set(uci_handle, set_val, ~set_val);
 		break;
@@ -102,13 +102,13 @@ int mhi_uci_tiocm_set(uci_client *client_ctxt, u32 set, u32 clear)
 	client_ctxt->local_tiocm &= ~status_clear;
 
 	mhi_uci_log(UCI_DBG_VERBOSE,
-		"Old TIOCM0x%x for chan 0x%x, Current TIOCM 0x%x\n",
+		"Old TIOCM0x%x for chan %d, Current TIOCM 0x%x\n",
 		old_status, client_ctxt->out_chan, client_ctxt->local_tiocm);
 	mutex_unlock(&client_ctxt->uci_ctxt->ctrl_mutex);
 
 	if (client_ctxt->local_tiocm != old_status) {
 		mhi_uci_log(UCI_DBG_VERBOSE,
-			"Setting TIOCM to 0x%x for chan 0x%x0\n",
+			"Setting TIOCM to 0x%x for chan %d\n",
 			client_ctxt->local_tiocm, client_ctxt->out_chan);
 		return mhi_uci_send_status_cmd(client_ctxt);
 	}
@@ -136,7 +136,7 @@ static unsigned int mhi_uci_client_poll(struct file *file, poll_table *wait)
 	}
 
 	mhi_uci_log(UCI_DBG_VERBOSE,
-		"Client attempted to poll chan 0x%x, returning mask 0x%x\n",
+		"Client attempted to poll chan %d, returning mask 0x%x\n",
 		uci_handle->in_chan, mask);
 	return mask;
 }
@@ -169,7 +169,7 @@ static int mhi_uci_client_open(struct inode *mhi_inode,
 
 		if (MHI_STATUS_SUCCESS != ret_val) {
 			mhi_uci_log(UCI_DBG_ERROR,
-					"Failed open outbound chan 0x%x ret 0x%x\n",
+					"Failed open outbound chan %d ret 0x%x\n",
 					iminor(mhi_inode), ret_val);
 		}
 		/* If this channel was never opened before */
@@ -211,7 +211,7 @@ static int mhi_uci_client_release(struct inode *mhi_inode,
 		}
 	} else {
 		mhi_uci_log(UCI_DBG_ERROR,
-			"Client close chan 0x%x, ref count 0x%x\n",
+			"Client close chan %d, ref count 0x%x\n",
 			iminor(mhi_inode), atomic_read(&client_handle->ref_count));
 	}
 	return 0;
@@ -237,7 +237,7 @@ static ssize_t mhi_uci_client_read(struct file *file, char __user *buf,
 		return -EINVAL;
 
 	mhi_uci_log(UCI_DBG_VERBOSE,
-		"Client attempted read on chan 0x%x\n", chan);
+		"Client attempted read on chan %d\n", chan);
 	uci_handle = file->private_data;
 	client_handle = uci_handle->inbound_handle;
 	mutex = &mhi_uci_ctxt.client_chan_lock[uci_handle->in_chan];
@@ -250,7 +250,7 @@ static ssize_t mhi_uci_client_read(struct file *file, char __user *buf,
 				&phy_buf,
 				&phy_buf_size);
 		mhi_uci_log(UCI_DBG_VERBOSE,
-			"Obtained pkt of size 0x%x at addr 0x%lx, chan 0x%x\n",
+			"Obtained pkt of size 0x%x at addr 0x%lx, chan %d\n",
 			phy_buf_size, (uintptr_t)phy_buf, chan);
 		if ((0 == phy_buf || 0 == phy_buf_size) &&
 				(atomic_read(&uci_handle->avail_pkts) <= 0)) {
@@ -313,7 +313,7 @@ static ssize_t mhi_uci_client_read(struct file *file, char __user *buf,
 		bytes_copied = *bytes_pending;
 		*bytes_pending = 0;
 		mhi_uci_log(UCI_DBG_VERBOSE,
-				"Copied 0x%x of 0x%x, chan 0x%x\n",
+				"Copied 0x%x of 0x%x, chan %d\n",
 				bytes_copied,
 				(u32)*bytes_pending,
 				chan);
@@ -328,7 +328,7 @@ static ssize_t mhi_uci_client_read(struct file *file, char __user *buf,
 		bytes_copied = uspace_buf_size;
 		*bytes_pending -= uspace_buf_size;
 		mhi_uci_log(UCI_DBG_VERBOSE,
-				"Copied 0x%x of 0x%x,chan 0x%x\n",
+				"Copied 0x%x of 0x%x,chan %d\n",
 				bytes_copied,
 				(u32)*bytes_pending,
 				chan);
@@ -452,17 +452,26 @@ int mhi_uci_probe(struct platform_device *dev)
 
 		if (MHI_STATUS_SUCCESS != ret_val)
 			mhi_uci_log(UCI_DBG_ERROR,
-			"Failed to open chan 0x%x, ret 0x%x\n", i, ret_val);
+			"Failed to open chan %d, ret 0x%x\n", i, ret_val);
 		ret_val = mhi_init_inbound(*init_handle, i);
 		if (MHI_STATUS_SUCCESS != ret_val)
 			mhi_uci_log(UCI_DBG_ERROR,
 			"Failed to init inbound 0x%x, ret 0x%x\n", i, ret_val);
-	}
-	ret_val = mhi_open_channel(&mhi_uci_ctxt.ctrl_handle,
-					mhi_uci_ctxt.ctrl_chan_id,
+		if (curr_client->out_chan == mhi_uci_ctxt.ctrl_chan_id) {
+			mhi_uci_log(UCI_DBG_ERROR,
+					"Initializing ctrl chan id %d\n",
+					curr_client->out_chan);
+			ret_val = mhi_open_channel(&curr_client->outbound_handle,
+					curr_client->out_chan,
 					0,
 					&mhi_uci_ctxt.client_info,
-					(void *)(mhi_uci_ctxt.ctrl_chan_id));
+					(void *)curr_client->out_chan);
+			if (MHI_STATUS_SUCCESS != ret_val)
+				mhi_uci_log(UCI_DBG_ERROR,
+				"Failed to init outbound 0x%x, ret 0x%x\n", i, ret_val);
+			mhi_uci_ctxt.ctrl_handle = curr_client->outbound_handle;
+		}
+	}
 	mhi_uci_log(UCI_DBG_VERBOSE, "Allocating char devices\n");
 	r = alloc_chrdev_region(&mhi_uci_ctxt.start_ctrl_nr,
 			0, MHI_MAX_SOFTWARE_CHANNELS,
@@ -586,8 +595,9 @@ int mhi_uci_send_packet(mhi_client_handle **client_handle,
 		chain = (data_left_to_insert - data_to_insert_now > 0) ? 1 : 0;
 		eob = chain;
 		mhi_uci_log(UCI_DBG_VERBOSE,
-				"At trb i = %d/%d, chain = %d, eob = %d, addr 0x%lx\n", i,
-				nr_avail_trbs, chain, eob, (uintptr_t)dma_addr);
+				"At trb i = %d/%d, chain = %d, eob = %d, addr 0x%lx chan %d\n", i,
+				nr_avail_trbs, chain, eob, (uintptr_t)dma_addr,
+				uci_handle->out_chan);
 		ret_val = mhi_queue_xfer(*client_handle, dma_addr,
 				data_to_insert_now, chain, eob);
 		if (0 != ret_val) {
@@ -675,7 +685,7 @@ MHI_STATUS mhi_init_inbound(mhi_client_handle *client_handle,
 	return ret_val;
 error_insert:
 	mhi_uci_log(UCI_DBG_ERROR,
-			"Failed insertion for chan 0x%x\n", chan);
+			"Failed insertion for chan %d\n", chan);
 
 	return MHI_STATUS_ERROR;
 }
@@ -728,7 +738,7 @@ void uci_xfer_cb(mhi_cb_info *cb_info)
 		if (chan_nr % 2) {
 			atomic_inc(&uci_handle->avail_pkts);
 			mhi_uci_log(UCI_DBG_VERBOSE,
-				"Received cb on chan 0x%x, avail pkts: 0x%x\n",
+				"Received cb on chan %d, avail pkts: 0x%x\n",
 				chan_nr,
 				atomic_read(&uci_handle->avail_pkts));
 			wake_up(&uci_handle->read_wait_queue);
@@ -740,7 +750,7 @@ void uci_xfer_cb(mhi_cb_info *cb_info)
 			kfree(dma_to_virt(NULL,
 			(dma_addr_t)(uintptr_t)result->payload_buf));
 			mhi_uci_log(UCI_DBG_VERBOSE,
-				"Received ack on chan 0x%x, pending acks: 0x%x\n",
+				"Received ack on chan %d, pending acks: 0x%x\n",
 				chan_nr,
 				atomic_read(&uci_handle->out_pkt_pend_ack));
 			atomic_dec(&uci_handle->out_pkt_pend_ack);
@@ -810,6 +820,8 @@ error_size:
 int mhi_uci_send_status_cmd(uci_client *client)
 {
 	rs232_ctrl_msg *rs232_pkt = NULL;
+	uci_client *uci_handle;
+	u32 ctrl_chan_id = mhi_uci_ctxt.ctrl_chan_id;
 
 	int ret_val = 0;
 	size_t pkt_size = sizeof(rs232_ctrl_msg);
@@ -818,7 +830,7 @@ int mhi_uci_send_status_cmd(uci_client *client)
 	if (NULL == rs232_pkt)
 		return -ENOMEM;
 	mhi_uci_log(UCI_DBG_VERBOSE,
-		"Received request to send msg for chan 0x%x\n",
+		"Received request to send msg for chan %d\n",
 		client->out_chan);
 	memset(rs232_pkt, 0, sizeof(rs232_ctrl_msg));
 	rs232_pkt->preamble = CTRL_MAGIC;
@@ -834,16 +846,19 @@ int mhi_uci_send_status_cmd(uci_client *client)
 
 	if (MHI_STATUS_SUCCESS != ret_val) {
 		mhi_uci_log(UCI_DBG_CRITICAL,
-			"Could not open chan 0x%x, for sideband ctrl\n",
+			"Could not open chan %d, for sideband ctrl\n",
 			client->out_chan);
 		goto error;
 	}
 
-	amount_sent = mhi_uci_send_packet(&mhi_uci_ctxt.ctrl_handle, rs232_pkt,
+
+	uci_handle = &mhi_uci_ctxt.client_handle_list[ctrl_chan_id/2];
+
+	amount_sent = mhi_uci_send_packet(&uci_handle->outbound_handle, rs232_pkt,
 						pkt_size, 0);
 	if (pkt_size != amount_sent){
 		mhi_uci_log(UCI_DBG_INFO,
-			"Failed to send signal on chan 0x%x, ret : %d n",
+			"Failed to send signal on chan %d, ret : %d n",
 			client->out_chan, ret_val);
 		goto error;
 	}
