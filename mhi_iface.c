@@ -19,6 +19,7 @@
 #include "mhi_bhi.h"
 
 mhi_pcie_devices mhi_devices;
+void *mhi_ipc_log;
 
 static const struct pci_device_id mhi_pcie_device_id[] = {
 	{ MHI_PCIE_VENDOR_ID, MHI_PCIE_DEVICE_ID,
@@ -103,6 +104,11 @@ static int __init mhi_init(void)
 {
 	if (pci_register_driver(&mhi_pcie_driver))
 		return -EIO;
+	mhi_ipc_log = ipc_log_context_create(MHI_IPC_LOG_PAGES, "mhi");
+	if (!mhi_ipc_log) {
+		mhi_log(MHI_MSG_ERROR,
+				"Failed to create IPC logging context\n");
+	}
 	mhi_uci_init();
 	rmnet_mhi_init();
 	return 0;
