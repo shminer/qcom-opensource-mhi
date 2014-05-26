@@ -91,32 +91,21 @@ void mhi_notify_clients(mhi_device_ctxt *mhi_dev_ctxt, MHI_CB_REASON reason)
 			}
 	}
 }
-void mhi_link_state_cb(struct msm_pcie_notify *notify)
+MHI_STATUS mhi_process_link_down(mhi_device_ctxt *mhi_dev_ctxt)
 {
 	unsigned long flags;
 	MHI_STATUS ret_val;
 	int r;
-	mhi_pcie_dev_info *mhi_pcie_dev = notify->data;
-	mhi_device_ctxt *mhi_dev_ctxt = NULL;
-	mhi_log(MHI_MSG_INFO, "Entered\n");
-	if (NULL == notify || NULL == notify->data) {
-		mhi_log(MHI_MSG_CRITICAL,
-		"Incomplete handle received\n");
-		return;
-	}
-	mhi_dev_ctxt = mhi_pcie_dev->mhi_ctxt;
-	switch (notify->event){
-	case MSM_PCIE_EVENT_LINKDOWN:
-		mhi_log(MHI_MSG_INFO,
-			"Received Link Down Callback\n");
-		if (NULL == mhi_dev_ctxt)
-			return;
-		switch(hrtimer_try_to_cancel(&mhi_dev_ctxt->inactivity_tmr))
-		{
-		case 0:
-			mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
-				"Timer was not active\n");
-			break;
+	mhi_log(MHI_MSG_INFO,
+		"Received Link Down Callback\n");
+	if (NULL == mhi_dev_ctxt)
+		return MHI_STATUS_ERROR;
+	switch(hrtimer_try_to_cancel(&mhi_dev_ctxt->inactivity_tmr))
+	{
+	case 0:
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+			"Timer was not active\n");
+		break;
 		case 1:
 			mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
 				"Timer was active\n");
@@ -133,14 +122,36 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify)
 		ret_val = mhi_deassert_device_wake(mhi_dev_ctxt);
 		write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 		//mhi_notify_clients(mhi_dev_ctxt, MHI_CB_MHI_DISABLED);
-		mhi_dev_ctxt->mhi_initialized = 0;
-		r =
-		msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client, 0);
-		if (r)
-			mhi_log(MHI_MSG_INFO,
-				"Failed to scale bus request to sleep set.\n");
-		mhi_pcie_dev->link_down_cntr++;
-		atomic_set(&mhi_dev_ctxt->data_pending, 0);
+	mhi_dev_ctxt->mhi_initialized = 0;
+	r =
+	msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client, 0);
+	if (r)
+		mhi_log(MHI_MSG_INFO,
+			"Failed to scale bus request to sleep set.\n");
+	mhi_dev_ctxt->dev_info->link_down_cntr++;
+	atomic_set(&mhi_dev_ctxt->data_pending, 0);
+	return MHI_STATUS_SUCCESS;
+}
+void mhi_link_state_cb(struct msm_pcie_notify *notify)
+{
+	MHI_STATUS ret_val;
+	int r;
+	mhi_pcie_dev_info *mhi_pcie_dev = notify->data;
+	mhi_device_ctxt *mhi_dev_ctxt = NULL;
+	mhi_log(MHI_MSG_INFO, "Entered\n");
+	if (NULL == notify || NULL == notify->data) {
+		mhi_log(MHI_MSG_CRITICAL,
+		"Incomplete handle received\n");
+		return;
+	}
+	mhi_dev_ctxt = mhi_pcie_dev->mhi_ctxt;
+	switch (notify->event){
+	case MSM_PCIE_EVENT_LINKDOWN:
+		if (MHI_STATUS_SUCCESS !=
+				mhi_process_link_down(mhi_dev_ctxt)){
+			mhi_log(MHI_MSG_CRITICAL,
+				"Failed to process link down\n");
+		}
 		break;
 	case MSM_PCIE_EVENT_LINKUP:
 
@@ -209,8 +220,14 @@ int mhi_ssr_notify_cb(struct notifier_block *nb,
 		mhi_pcie_dev->link_down_cntr++;
 		break;
 	case SUBSYS_AFTER_SHUTDOWN:
-		mhi_log(MHI_MSG_VERBOSE,
-		"Received Subsystem event AFTER_SHUTDOWN\n");
+		mhi_log(MHI_MSG_INFO,
+			"Received Subsystem event AFTER_SHUTDOWN\n");
+		mhi_notify_clients(mhi_dev_ctxt, MHI_CB_MHI_DISABLED);
+		if (MHI_STATUS_SUCCESS !=
+				mhi_process_link_down(mhi_dev_ctxt)) {
+			mhi_log(MHI_MSG_CRITICAL,
+				"Failed to process link down\n");
+		}
 		break;
 	case SUBSYS_BEFORE_POWERUP:
 		mhi_log(MHI_MSG_VERBOSE,

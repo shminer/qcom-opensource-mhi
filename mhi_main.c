@@ -609,6 +609,8 @@ MHI_STATUS parse_xfer_event(mhi_device_ctxt *ctxt, mhi_event_pkt *event)
 	switch (MHI_EV_READ_CODE(EV_TRB_CODE, event)) {
 	case MHI_EVENT_CC_EOB:
 		mhi_log(MHI_MSG_VERBOSE, "IEOB condition detected\n");
+	case MHI_EVENT_CC_OVERFLOW:
+		mhi_log(MHI_MSG_VERBOSE, "Overflow condition detected\n");
 	case MHI_EVENT_CC_EOT:
 	{
 		void *trb_data_loc;
