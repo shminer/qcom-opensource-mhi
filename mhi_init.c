@@ -378,6 +378,16 @@ error_event_handle_alloc:
  */
 MHI_STATUS mhi_init_state_change_thread_work_queue(mhi_state_work_queue *q)
 {
+	u32 mutex_acquired = 0;
+	if (NULL == q->q_mutex) {
+		q->q_mutex = kmalloc(sizeof(struct mutex), GFP_KERNEL);
+		if (NULL == q->q_mutex)
+			return MHI_STATUS_ALLOC_ERROR;
+		mutex_init(q->q_mutex);
+	} else {
+		mutex_lock(q->q_mutex);
+		mutex_acquired = 1;
+	}
 	q->queue_full_cntr = 0;
 	q->q_info.base = q->buf;
 	q->q_info.rp = q->buf;
@@ -391,6 +401,8 @@ MHI_STATUS mhi_init_state_change_thread_work_queue(mhi_state_work_queue *q)
 			return MHI_STATUS_ALLOC_ERROR;
 		mutex_init(q->q_mutex);
 	}
+	if (mutex_acquired)
+		mutex_unlock(q->q_mutex);
 
 	return MHI_STATUS_SUCCESS;
 }

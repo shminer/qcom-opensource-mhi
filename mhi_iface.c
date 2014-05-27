@@ -79,7 +79,8 @@ int mhi_probe(struct pci_dev *pcie_device,
 	mhi_pcie_dev->pcie_device = pcie_device;
 	mhi_pcie_dev->mhi_pcie_driver = &mhi_pcie_driver;
 	mhi_pcie_dev->mhi_pci_link_event.events =
-			(MSM_PCIE_EVENT_LINKDOWN | MSM_PCIE_EVENT_LINKUP);
+			(MSM_PCIE_EVENT_LINKDOWN | MSM_PCIE_EVENT_LINKUP |
+			 MSM_PCIE_EVENT_WAKE_RECOVERY);
 	mhi_pcie_dev->mhi_pci_link_event.user = pcie_device;
 	mhi_pcie_dev->mhi_pci_link_event.callback = mhi_link_state_cb;
 	mhi_pcie_dev->mhi_pci_link_event.notify.data = mhi_pcie_dev;
