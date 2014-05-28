@@ -146,6 +146,9 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify)
 	}
 	mhi_dev_ctxt = mhi_pcie_dev->mhi_ctxt;
 	switch (notify->event){
+	case MSM_PCIE_EVENT_NO_ACCESS:
+		mhi_log(MHI_MSG_CRITICAL,
+			"Received NO_ACCESS event\n");
 	case MSM_PCIE_EVENT_LINKDOWN:
 		if (MHI_STATUS_SUCCESS !=
 				mhi_process_link_down(mhi_dev_ctxt)){
