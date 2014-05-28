@@ -466,6 +466,7 @@ struct mhi_device_ctxt {
 	u32 clients_probed;
 	unsigned long esoc_notif;
 	STATE_TRANSITION base_state;
+	atomic_t outbound_acks;
 };
 
 MHI_STATUS mhi_reset_all_thread_queues(mhi_device_ctxt *mhi_dev_ctxt);

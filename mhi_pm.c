@@ -149,7 +149,8 @@ enum hrtimer_restart mhi_initiate_M1(struct hrtimer *timer)
 			(MHI_STATE_M1 == mhi_dev_ctxt->mhi_state ||
 			 MHI_STATE_M0 == mhi_dev_ctxt->mhi_state) &&
 			(0 == mhi_dev_ctxt->pending_M3) &&
-			mhi_dev_ctxt->mhi_initialized) {
+			mhi_dev_ctxt->mhi_initialized &&
+			(0 == atomic_read(&mhi_dev_ctxt->outbound_acks))) {
 		mhi_dev_ctxt->mhi_state = MHI_STATE_M1;
 		ret_val = mhi_deassert_device_wake(mhi_dev_ctxt);
 		mhi_dev_ctxt->m0_m1++;
