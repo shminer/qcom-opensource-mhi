@@ -706,6 +706,7 @@ void uci_xfer_cb(mhi_cb_info *cb_info)
 	case MHI_CB_MHI_DISABLED :
 		if (!atomic_cmpxchg(&mhi_uci_ctxt.mhi_disabled, 0, 1)) {
 			for (i = 0; i < MHI_MAX_NR_OF_CLIENTS; ++i) {
+				wmb();
 				uci_handle =
 					&mhi_uci_ctxt.client_handle_list[i];
 				if (uci_handle->mhi_status != -ENETRESET) {
