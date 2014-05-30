@@ -619,5 +619,7 @@ int mhi_assert_device_wake(mhi_device_ctxt *mhi_dev_ctxt);
 MHI_STATUS mhi_reg_notifiers(mhi_device_ctxt *mhi_dev_ctxt);
 int mhi_cpu_notifier_cb(struct notifier_block *nfb, unsigned long action,
 			void *hcpu);
+MHI_STATUS mhi_init_wakelock(mhi_device_ctxt *mhi_dev_ctxt);
+MHI_STATUS init_mhi_base_state(mhi_device_ctxt* mhi_dev_ctxt);
 
 #endif
