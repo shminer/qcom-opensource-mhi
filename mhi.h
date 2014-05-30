@@ -467,6 +467,7 @@ struct mhi_device_ctxt {
 	unsigned long esoc_notif;
 	STATE_TRANSITION base_state;
 	atomic_t outbound_acks;
+	struct wakeup_source wake_lock;
 };
 
 MHI_STATUS mhi_reset_all_thread_queues(mhi_device_ctxt *mhi_dev_ctxt);
