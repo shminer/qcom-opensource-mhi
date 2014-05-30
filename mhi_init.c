@@ -129,6 +129,13 @@ MHI_STATUS mhi_init_device_ctxt(mhi_pcie_dev_info *dev_info,
 					MHI_INIT_ERROR_STAGE_DEVICE_CTRL);
 		return MHI_STATUS_ERROR;
 	}
+	if (MHI_STATUS_SUCCESS != mhi_init_wakelock(*mhi_device))
+	{
+		mhi_log(MHI_MSG_ERROR, "Failed to initialize wakelock\n");
+		mhi_clean_init_stage(*mhi_device,
+					MHI_INIT_ERROR_STAGE_DEVICE_CTRL);
+		return MHI_STATUS_ERROR;
+	}
 	(*mhi_device)->dev_info = dev_info;
 	(*mhi_device)->dev_props = &dev_info->core;
 
@@ -751,4 +758,9 @@ MHI_STATUS mhi_reg_notifiers(mhi_device_ctxt *mhi_dev_ctxt)
 		return MHI_STATUS_ERROR;
 	else
 		return MHI_STATUS_SUCCESS;
+}
+MHI_STATUS mhi_init_wakelock(mhi_device_ctxt *mhi_dev_ctxt)
+{
+	wakeup_source_init(&mhi_dev_ctxt->wake_lock, "mhi_wakeup_source");
+	return MHI_STATUS_SUCCESS;
 }
