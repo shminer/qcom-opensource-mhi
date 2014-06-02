@@ -430,6 +430,8 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	MHI_TRB_SET_INFO(TX_TRB_TYPE, pkt_loc, MHI_PKT_TYPE_TRANSFER);
 	MHI_TX_TRB_SET_LEN(TX_TRB_LEN, pkt_loc, buf_len);
 
+	if (chan % 2 == 0)
+		atomic_inc(&mhi_dev_ctxt->outbound_acks);
 	spin_lock_irqsave(&mhi_dev_ctxt->db_write_lock[chan], flags);
 	if (likely(((MHI_STATE_M0 == mhi_dev_ctxt->mhi_state) ||
 		(MHI_STATE_M1 == mhi_dev_ctxt->mhi_state)) &&
@@ -1126,6 +1128,7 @@ MHI_STATUS parse_outbound(mhi_device_ctxt *mhi_dev_ctxt, u32 chan,
 	}
 	ret_val = ctxt_del_element(&mhi_dev_ctxt->mhi_local_chan_ctxt[chan],
 						NULL);
+	atomic_dec(&mhi_dev_ctxt->outbound_acks);
 	return MHI_STATUS_SUCCESS;
 }
 
