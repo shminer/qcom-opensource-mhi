@@ -105,16 +105,10 @@ int mhi_state_change_thread(void *ctxt)
 				"Failed to delete element from STT workqueue\n");
 		mutex_unlock(work_q->q_mutex);
 		ret_val = process_stt_work_item(mhi_dev_ctxt, cur_work_item);
-		if (ret_val != MHI_STATUS_SUCCESS)
-		{
-			u32 i;
-			for (i = 0; i< 100; ++i) {
-				mhi_log(MHI_MSG_VERBOSE,
-				"Detected failure in STT waiting %d\n",i);
-				msleep(5000);
-			}
+		if (ret_val != MHI_STATUS_SUCCESS) {
+			mhi_log(MHI_MSG_INFO,
+			"Detected failure in STT!\n");
 		}
-				///MHI_ASSERT(ret_val == MHI_STATUS_SUCCESS);
 	}
 	return 0;
 }

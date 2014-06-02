@@ -428,7 +428,7 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	spin_lock_irqsave(&mhi_dev_ctxt->db_write_lock[chan], flags);
 	if (likely(((MHI_STATE_M0 == mhi_dev_ctxt->mhi_state) ||
 		(MHI_STATE_M1 == mhi_dev_ctxt->mhi_state)) &&
-		(chan_ctxt->mhi_chan_state == MHI_CHAN_STATE_RUNNING))) {
+		(chan_ctxt->mhi_chan_state != MHI_CHAN_STATE_ERROR))) {
 		mhi_dev_ctxt->mhi_chan_db_order[chan]++;
 		db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
 			(uintptr_t)mhi_dev_ctxt->mhi_local_chan_ctxt[chan].wp);
@@ -444,8 +444,8 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 		}
 	} else {
 		mhi_log(MHI_MSG_INFO,
-			"Current MHI mhi_dev_ctxt state %d, not M0 or M1\n",
-			mhi_dev_ctxt->mhi_state);
+			"Could not write doorbell MHI state %d, Chan state %d\n",
+			mhi_dev_ctxt->mhi_state, chan_ctxt->mhi_chan_state);
 	}
 	spin_unlock_irqrestore(&mhi_dev_ctxt->db_write_lock[chan], flags);
 	/* If there are no clients still sending we can trigger our
