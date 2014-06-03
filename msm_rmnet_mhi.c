@@ -408,7 +408,7 @@ void rmnet_mhi_tx_cb(mhi_cb_info *cb_info)
 		    tx_cb_skb_free_burst_max[rmnet_mhi_ptr->dev_index]);
 
 	/* In case we couldn't write again, now we can! */
-	netif_start_queue(dev);
+	netif_wake_queue(dev);
 		break;
 		default:
 			pr_err("%s: Got SSR notification %d from MHI CORE.",
