@@ -81,20 +81,13 @@ static void mhi_move_interrupts(mhi_device_ctxt *mhi_dev_ctxt, u32 cpu)
 {
 	u32 irq_to_affin = 0;
 
-	mhi_log(MHI_MSG_VERBOSE, "Moving irqs to core %d, moved %d times\n",
-		cpu, mhi_dev_ctxt->nr_irq_migrations++);
-
 	MHI_GET_EVENT_RING_INFO(EVENT_RING_MSI_VEC,
 	mhi_dev_ctxt->ev_ring_props[TERTIARY_EVENT_RING], irq_to_affin);
 	irq_to_affin += mhi_dev_ctxt->dev_props->irq_base;
-	mhi_log(MHI_MSG_VERBOSE, "Moving irq %d, to core %d\n",
-				irq_to_affin, cpu);
 	irq_set_affinity(irq_to_affin, get_cpu_mask(cpu));
 	MHI_GET_EVENT_RING_INFO(EVENT_RING_MSI_VEC,
 	mhi_dev_ctxt->ev_ring_props[SECONDARY_EVENT_RING], irq_to_affin);
 	irq_to_affin += mhi_dev_ctxt->dev_props->irq_base;
-	mhi_log(MHI_MSG_VERBOSE, "Moving irq %d, to core %d\n",
-				irq_to_affin, cpu);
 	irq_set_affinity(irq_to_affin, get_cpu_mask(cpu));
 }
 
