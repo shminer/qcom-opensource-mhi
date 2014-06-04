@@ -224,6 +224,7 @@ MHI_STATUS mhi_init_sync(mhi_device_ctxt *mhi_dev_ctxt)
 	for (i = 0; i < MHI_MAX_CHANNELS; ++i)
 		spin_lock_init(&mhi_dev_ctxt->db_write_lock[i]);
 	rwlock_init(&mhi_dev_ctxt->xfer_lock);
+	mutex_init(&mhi_dev_ctxt->mhi_link_state);
 	return MHI_STATUS_SUCCESS;
 
 db_write_lock_free:
