@@ -405,6 +405,7 @@ struct mhi_device_ctxt {
 	mhi_ring mhi_local_event_ctxt[MHI_MAX_CHANNELS];
 	mhi_ring mhi_local_cmd_ctxt[NR_OF_CMD_RINGS];
 	struct mutex *mhi_chan_mutex;
+	struct mutex mhi_link_state;
 	spinlock_t *mhi_ev_spinlock_list;
 	struct mutex *mhi_cmd_mutex_list;
 	mhi_client_handle *client_handle_list[MHI_MAX_CHANNELS];
@@ -423,6 +424,7 @@ struct mhi_device_ctxt {
 	MHI_THREAD_STATE state_change_thread_state;
 	struct platform_device *mhi_uci_dev;
 	struct platform_device *mhi_rmnet_dev;
+	atomic_t link_ops_flag;
 
 	volatile u32 kill_threads;
 	mhi_state_work_queue state_change_work_item_list;
@@ -622,5 +624,7 @@ int mhi_cpu_notifier_cb(struct notifier_block *nfb, unsigned long action,
 			void *hcpu);
 MHI_STATUS mhi_init_wakelock(mhi_device_ctxt *mhi_dev_ctxt);
 MHI_STATUS init_mhi_base_state(mhi_device_ctxt* mhi_dev_ctxt);
+MHI_STATUS mhi_turn_off_pcie_link(mhi_device_ctxt *mhi_dev_ctxt);
+MHI_STATUS mhi_turn_on_pcie_link(mhi_device_ctxt *mhi_dev_ctxt);
 
 #endif
