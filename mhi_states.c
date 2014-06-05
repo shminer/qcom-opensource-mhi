@@ -12,55 +12,6 @@
 #include "mhi_sys.h"
 #include "mhi_hwio.h"
 
-MHI_STATUS mhi_reset(mhi_device_ctxt *mhi_dev_ctxt)
-{
-	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
-	u32 thread_wait_for_sleep_timeout = 0;
-	u32 i = 0;
-
-	if (mhi_dev_ctxt == NULL)
-		return MHI_STATUS_ERROR;
-
-	for (i = 0; i < MHI_MAX_CHANNELS; ++i) {
-		/* Stop all clients from transfering data on the outbound
-		 * channels */
-		ret_val = mhi_set_state_of_all_channels(mhi_dev_ctxt,
-							MHI_CHAN_STATE_ERROR);
-		if (MHI_STATUS_SUCCESS != ret_val) {
-			mhi_log(MHI_MSG_CRITICAL,
-			"Failed to set state of all channels to error\n");
-			return ret_val;
-		}
-	}
-	MHI_REG_WRITE_FIELD(mhi_dev_ctxt->mmio_addr, MHICTRL,
-				MHICTRL_MHISTATE_MASK,
-				MHICTRL_MHISTATE_SHIFT, MHI_STATE_RESET);
-
-	mhi_log(MHI_MSG_INFO, "Waiting for RX and CMD threads to stop\n");
-
-	while (0 == thread_wait_for_sleep_timeout &&
-		MHI_THREAD_STATE_SUSPENDED !=
-				mhi_dev_ctxt->event_thread_state) {
-		if (0 == thread_wait_for_sleep_timeout) {
-			msleep(MHI_THREAD_SLEEP_TIMEOUT_MS);
-			thread_wait_for_sleep_timeout = 1;
-		} else {
-			mhi_log(MHI_MSG_INFO,
-			  "Threads failed to stop.\n");
-			return MHI_STATUS_ERROR;
-		}
-	}
-
-	mutex_lock(mhi_dev_ctxt->state_change_work_item_list.q_mutex);
-	mhi_init_state_change_thread_work_queue
-				 (&mhi_dev_ctxt->state_change_work_item_list);
-	mutex_unlock(mhi_dev_ctxt->state_change_work_item_list.q_mutex);
-
-	mhi_log(MHI_MSG_INFO, "Resetting all rings..\n");
-	mhi_init_contexts(mhi_dev_ctxt);
-
-	return ret_val;
-}
 
 int mhi_state_change_thread(void *ctxt)
 {
@@ -79,25 +30,27 @@ int mhi_state_change_thread(void *ctxt)
 	for (;;) {
 		r = wait_event_interruptible(
 				*mhi_dev_ctxt->state_change_event_handle,
-				work_q->q_info.rp != work_q->q_info.wp ||
-				mhi_dev_ctxt->kill_threads);
-		switch(r) {
-		case -ERESTARTSYS:
+				((work_q->q_info.rp != work_q->q_info.wp) && mhi_dev_ctxt->link_up) ||
+				mhi_dev_ctxt->kill_threads ||
+				(!mhi_dev_ctxt->link_up && !mhi_dev_ctxt->st_thread_stopped));
+		if (r) {
+			mhi_log(MHI_MSG_INFO,
+				"Caught signal %d, quitting\n", r);
 			return 0;
-			break;
-		default:
-			MHI_ASSERT(work_q->q_info.rp != work_q->q_info.wp,
-				"Could not retrieve state element from work queue\n");
-			break;
 		}
 
 		if (mhi_dev_ctxt->kill_threads) {
 			mhi_log(MHI_MSG_INFO,
-				"Caught exit signal, quitting\n");
-			mhi_dev_ctxt->state_change_thread_state =
-						MHI_THREAD_STATE_EXIT;
+				"Caught kill signal, quitting\n");
 			return 0;
 		}
+		if (!mhi_dev_ctxt->link_up) {
+			mhi_log(MHI_MSG_INFO,
+				"Caught link down signal, suspending\n");
+			mhi_dev_ctxt->st_thread_stopped = 1;
+			continue;
+		}
+		mhi_dev_ctxt->st_thread_stopped = 0;
 		mutex_lock(work_q->q_mutex);
 		cur_work_item = *(STATE_TRANSITION *)(state_change_q->rp);
 		ret_val = ctxt_del_element(&work_q->q_info, NULL);
@@ -562,7 +515,6 @@ MHI_STATUS process_SYSERR_transition(mhi_device_ctxt *mhi_dev_ctxt,
 {
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
 	mhi_log(MHI_MSG_CRITICAL, "Received SYS ERROR. Resetting MHI\n");
-	ret_val = mhi_reset(mhi_dev_ctxt);
 	if (MHI_STATUS_SUCCESS != ret_val) {
 		mhi_log(MHI_MSG_CRITICAL, "Failed to reset mhi\n");
 		return MHI_STATUS_ERROR;

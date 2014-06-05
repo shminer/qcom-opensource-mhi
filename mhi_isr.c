@@ -71,18 +71,27 @@ int parse_event_thread(void *ctxt)
 	for (;;) {
 		ret_val =
 			wait_event_interruptible(*mhi_dev_ctxt->event_handle,
-			(atomic_read(&mhi_dev_ctxt->events_pending) > 0) ||
-			mhi_dev_ctxt->kill_threads);
+			((atomic_read(&mhi_dev_ctxt->events_pending) > 0) && mhi_dev_ctxt->link_up) ||
+			mhi_dev_ctxt->kill_threads ||
+			(!mhi_dev_ctxt->link_up && !mhi_dev_ctxt->ev_thread_stopped));
 
-		if (0 == ret_val) {
+		switch(ret_val) {
+		case -ERESTARTSYS:
+			return 0;
+			break;
+		default:
 			if (mhi_dev_ctxt->kill_threads) {
 				mhi_log(MHI_MSG_INFO,
 					"Caught exit signal, quitting\n");
-				mhi_dev_ctxt->event_thread_state =
-					MHI_THREAD_STATE_EXIT;
 				return 0;
 			}
+			if (!mhi_dev_ctxt->link_up) {
+				mhi_dev_ctxt->ev_thread_stopped = 1;
+				continue;
+			}
+			break;
 		}
+		mhi_dev_ctxt->ev_thread_stopped = 0;
 		atomic_dec(&mhi_dev_ctxt->events_pending);
 
 		for (i = 0; i < EVENT_RINGS_ALLOCATED; ++i) {

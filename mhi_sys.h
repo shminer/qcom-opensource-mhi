@@ -95,15 +95,6 @@ struct mhi_meminfo {
 	uintptr_t size;
 };
 
-struct osal_thread {
-	struct task_struct *thread_handle;
-	void *data;
-	const char *name_fmt;
-};
-
-MHI_STATUS mhi_spawn_thread(void *ctxt, int(fn)(void *),
-			osal_thread *handle, char[]);
-
 MHI_STATUS mhi_mallocmemregion(mhi_meminfo *meminfo, size_t size);
 
 uintptr_t mhi_get_phy_addr(mhi_meminfo *meminfo);

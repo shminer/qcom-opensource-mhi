@@ -313,15 +313,6 @@ void mhi_freememregion(mhi_meminfo *meminfo)
 	meminfo->pa_unaligned = 0;
 	return;
 }
-MHI_STATUS mhi_spawn_thread(void *ctxt, int(fn)(void *),
-			osal_thread *handle, char name[])
-{
-	handle->thread_handle = kthread_run(fn, ctxt, name);
-	if (-ENOMEM == (int)handle->thread_handle)
-		return MHI_STATUS_ERROR;
-	else
-		return MHI_STATUS_SUCCESS;
-}
 
 void print_ring(mhi_ring *local_chan_ctxt, u32 ring_id)
 {
