@@ -159,30 +159,41 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify)
 	case MSM_PCIE_EVENT_LINKUP:
 
 		if (0 == mhi_pcie_dev->link_up_cntr) {
-		mhi_log(MHI_MSG_INFO,
-			"Initializing MHI for the first time\n");
-			mhi_startup_thread(mhi_pcie_dev);
-			mhi_dev_ctxt = mhi_pcie_dev->mhi_ctxt;
-			pci_set_master(mhi_pcie_dev->pcie_device);
+			mhi_log(MHI_MSG_INFO,
+				"Initializing MHI for the first time\n");
+				mhi_startup_thread(mhi_pcie_dev);
+				mhi_dev_ctxt = mhi_pcie_dev->mhi_ctxt;
+				pci_set_master(mhi_pcie_dev->pcie_device);
 		} else {
 			mhi_log(MHI_MSG_INFO,
 				"Received Link Up Callback\n");
 		}
-		mhi_assert_device_wake(mhi_dev_ctxt);
-		mhi_dev_ctxt->link_up = 1;
-		r =
-		msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client, 1);
-		if (r)
-		mhi_log(MHI_MSG_INFO,
-			"Failed to scale bus request to active set.\n");
-		ret_val = mhi_init_state_transition(mhi_dev_ctxt,
-				mhi_dev_ctxt->base_state);
-		if (MHI_STATUS_SUCCESS != ret_val) {
-			mhi_log(MHI_MSG_CRITICAL,
-			"Failed to start state change event, to %d\n",
-			mhi_dev_ctxt->base_state);
-		}
+		ret_val = init_mhi_base_state(mhi_dev_ctxt);
+		if (ret_val != MHI_STATUS_SUCCESS)
+			mhi_log(MHI_MSG_INFO,
+				"Could not reset MHI, ret: %d\n", ret_val);
+
 		mhi_pcie_dev->link_up_cntr++;
+		break;
+	case MSM_PCIE_EVENT_WAKEUP:
+		r = msm_pcie_pm_control(MSM_PCIE_RESUME,
+				    mhi_pcie_dev->pcie_device->bus->number,
+				    mhi_pcie_dev->pcie_device, NULL,
+				    MSM_PCIE_CONFIG_NO_CFG_RESTORE | MSM_PCIE_CONFIG_LINKDOWN);
+		if (r) {
+			mhi_log(MHI_MSG_CRITICAL,
+				"Failed to restore PCIe link ret: %d\n", r);
+		} else {
+			r = msm_pcie_recover_config(mhi_pcie_dev->pcie_device);
+			if (r)
+				mhi_log(MHI_MSG_CRITICAL,
+				"Failed to restore PCIe config space ret: %d\n", r);
+		}
+		ret_val = init_mhi_base_state(mhi_dev_ctxt);
+		if (ret_val != MHI_STATUS_SUCCESS)
+				mhi_log(MHI_MSG_CRITICAL,
+				"Failed to initiate MHI base state: %d\n", ret_val);
+
 		break;
 	default:
 		mhi_log(MHI_MSG_INFO,
@@ -221,6 +232,10 @@ int mhi_ssr_notify_cb(struct notifier_block *nb,
 		mhi_notify_clients(mhi_dev_ctxt, MHI_CB_MHI_DISABLED);
 		mhi_dev_ctxt->mhi_initialized = 0;
 		mhi_pcie_dev->link_down_cntr++;
+		msm_pcie_pm_control(MSM_PCIE_SUSPEND,
+				    mhi_dev_ctxt->dev_info->pcie_device->bus->number,
+				    mhi_dev_ctxt->dev_info->pcie_device, NULL,
+				    MSM_PCIE_CONFIG_NO_CFG_RESTORE);
 		break;
 	case SUBSYS_AFTER_SHUTDOWN:
 		mhi_log(MHI_MSG_INFO,
@@ -254,4 +269,26 @@ int mhi_ssr_notify_cb(struct notifier_block *nb,
 		break;
 	}
 	return NOTIFY_OK;
+}
+
+MHI_STATUS init_mhi_base_state(mhi_device_ctxt* mhi_dev_ctxt)
+{
+	int r = 0;
+	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
+
+	mhi_assert_device_wake(mhi_dev_ctxt);
+	mhi_dev_ctxt->link_up = 1;
+	r =
+	msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client, 1);
+	if (r)
+	mhi_log(MHI_MSG_INFO,
+		"Failed to scale bus request to active set.\n");
+	ret_val = mhi_init_state_transition(mhi_dev_ctxt,
+			mhi_dev_ctxt->base_state);
+	if (MHI_STATUS_SUCCESS != ret_val) {
+		mhi_log(MHI_MSG_CRITICAL,
+		"Failed to start state change event, to %d\n",
+		mhi_dev_ctxt->base_state);
+	}
+	return ret_val;
 }
