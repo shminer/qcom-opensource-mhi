@@ -142,7 +142,9 @@ MHI_STATUS mhi_process_event_ring(mhi_device_ctxt *mhi_dev_ctxt,
 					&event_to_process);
 			break;
 		case MHI_PKT_TYPE_TX_EVENT:
+			__pm_stay_awake(&mhi_dev_ctxt->wake_lock);
 			parse_xfer_event(mhi_dev_ctxt, &event_to_process);
+			__pm_relax(&mhi_dev_ctxt->wake_lock);
 			break;
 		case MHI_PKT_TYPE_STATE_CHANGE_EVENT:
 		{

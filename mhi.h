@@ -467,6 +467,7 @@ struct mhi_device_ctxt {
 	unsigned long esoc_notif;
 	STATE_TRANSITION base_state;
 	atomic_t outbound_acks;
+	struct wakeup_source wake_lock;
 };
 
 MHI_STATUS mhi_reset_all_thread_queues(mhi_device_ctxt *mhi_dev_ctxt);
@@ -619,5 +620,6 @@ int mhi_assert_device_wake(mhi_device_ctxt *mhi_dev_ctxt);
 MHI_STATUS mhi_reg_notifiers(mhi_device_ctxt *mhi_dev_ctxt);
 int mhi_cpu_notifier_cb(struct notifier_block *nfb, unsigned long action,
 			void *hcpu);
+MHI_STATUS mhi_init_wakelock(mhi_device_ctxt *mhi_dev_ctxt);
 
 #endif
