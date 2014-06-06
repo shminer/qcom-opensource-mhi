@@ -183,16 +183,19 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify)
 		if (r) {
 			mhi_log(MHI_MSG_CRITICAL,
 				"Failed to restore PCIe link ret: %d\n", r);
+			mhi_dev_ctxt->link_up = 0;
 		} else {
 			r = msm_pcie_recover_config(mhi_pcie_dev->pcie_device);
-			if (r)
+			if (r) {
 				mhi_log(MHI_MSG_CRITICAL,
 				"Failed to restore PCIe config space ret: %d\n", r);
+			} else {
+				ret_val = init_mhi_base_state(mhi_dev_ctxt);
+				if (ret_val != MHI_STATUS_SUCCESS)
+					mhi_log(MHI_MSG_CRITICAL,
+					"Failed to initiate MHI base state: %d\n", ret_val);
+			}
 		}
-		ret_val = init_mhi_base_state(mhi_dev_ctxt);
-		if (ret_val != MHI_STATUS_SUCCESS)
-				mhi_log(MHI_MSG_CRITICAL,
-				"Failed to initiate MHI base state: %d\n", ret_val);
 
 		break;
 	default:
@@ -222,7 +225,7 @@ int mhi_ssr_notify_cb(struct notifier_block *nb,
 		"Received Subsystem event AFTER_POWERUP\n");
 		break;
 	case SUBSYS_BEFORE_SHUTDOWN:
-		mhi_log(MHI_MSG_VERBOSE,
+		mhi_log(MHI_MSG_INFO,
 		"Received Subsystem event BEFORE_SHUTDOWN\n");
 		write_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
 		mhi_dev_ctxt->link_up = 0;
@@ -232,10 +235,14 @@ int mhi_ssr_notify_cb(struct notifier_block *nb,
 		mhi_notify_clients(mhi_dev_ctxt, MHI_CB_MHI_DISABLED);
 		mhi_dev_ctxt->mhi_initialized = 0;
 		mhi_pcie_dev->link_down_cntr++;
-		msm_pcie_pm_control(MSM_PCIE_SUSPEND,
+		ret_val = msm_pcie_pm_control(MSM_PCIE_SUSPEND,
 				    mhi_dev_ctxt->dev_info->pcie_device->bus->number,
 				    mhi_dev_ctxt->dev_info->pcie_device, NULL,
 				    MSM_PCIE_CONFIG_NO_CFG_RESTORE);
+		if (ret_val)
+			mhi_log(MHI_MSG_CRITICAL,
+				"Failed to suspend link\n");
+
 		break;
 	case SUBSYS_AFTER_SHUTDOWN:
 		mhi_log(MHI_MSG_INFO,
