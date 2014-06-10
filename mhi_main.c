@@ -81,7 +81,7 @@ static void mhi_move_interrupts(mhi_device_ctxt *mhi_dev_ctxt, u32 cpu)
 {
 	u32 irq_to_affin = 0;
 
-	mhi_log(MHI_MSG_INFO, "Moving irqs to core %d, moved %d times\n",
+	mhi_log(MHI_MSG_VERBOSE, "Moving irqs to core %d, moved %d times\n",
 		cpu, mhi_dev_ctxt->nr_irq_migrations++);
 
 	MHI_GET_EVENT_RING_INFO(EVENT_RING_MSI_VEC,
@@ -674,8 +674,8 @@ MHI_STATUS parse_xfer_event(mhi_device_ctxt *ctxt, mhi_event_pkt *event)
 			}
 
 			client_handle = mhi_dev_ctxt->client_handle_list[chan];
-			client_handle->pkt_count++;
 			if (NULL != client_handle) {
+				client_handle->pkt_count++;
 				result = &client_handle->result;
 				result->payload_buf = trb_data_loc;
 				result->bytes_xferd = xfer_len;
