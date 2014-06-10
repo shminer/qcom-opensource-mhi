@@ -58,6 +58,7 @@
 #include <linux/msm-bus.h>
 #include <linux/cpu.h>
 #include <linux/irq.h>
+#include <linux/pm_wakeup.h>
 
 extern MHI_DEBUG_LEVEL mhi_msg_lvl;
 extern MHI_DEBUG_LEVEL mhi_ipc_log_lvl;
