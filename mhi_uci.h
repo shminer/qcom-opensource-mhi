@@ -29,6 +29,7 @@
 #include <linux/platform_device.h>
 #include <linux/tty.h>
 #include <linux/delay.h>
+#include <linux/ipc_logging.h>
 
 #define MIN(_x, _y)(((_x) < (_y)) ? (_x) : (_y))
 #define MHI_DEV_NODE_NAME_LEN 13
@@ -56,10 +57,16 @@ typedef enum UCI_DBG_LEVEL {
 } UCI_DBG_LEVEL;
 
 extern UCI_DBG_LEVEL mhi_uci_msg_lvl;
+extern UCI_DBG_LEVEL mhi_uci_ipc_log_lvl;
+void *mhi_uci_ipc_log;
 
 #define mhi_uci_log(_msg_lvl, _msg, ...) do { \
 	if (_msg_lvl >= mhi_uci_msg_lvl) { \
 		pr_info("[%s] "_msg, __func__, ##__VA_ARGS__); \
+	} \
+	if (mhi_uci_ipc_log && (_msg_lvl >= mhi_uci_ipc_log_lvl)) { \
+		ipc_log_string(mhi_uci_ipc_log,                     \
+			"[%s] " _msg, __func__, ##__VA_ARGS__);     \
 	} \
 } while (0)
 
