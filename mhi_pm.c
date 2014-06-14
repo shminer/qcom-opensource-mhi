@@ -51,7 +51,9 @@ int mhi_suspend(struct pci_dev *pcie_dev, pm_message_t state)
 	if (0 != mhi_initiate_M3(mhi_dev_ctxt))
 		return -EIO;
 	} else {
-		return 0;
+		mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
+			"State is already %d did we get M3 completion?\n",
+				mhi_dev_ctxt->mhi_state);
 	}
 	ret_val =
 		msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client, 0);
@@ -88,50 +90,50 @@ int mhi_resume(struct pci_dev *pcie_dev)
 		return -EIO;
 	}
 	if (!atomic_cmpxchg(&mhi_dev_ctxt->link_ops_flag, 0, 1)) {
-	if (MHI_STATUS_SUCCESS != mhi_turn_on_pcie_link(mhi_dev_ctxt)) {
-		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
-			"Failed to turn on PCIe link.\n");
+		if (MHI_STATUS_SUCCESS != mhi_turn_on_pcie_link(mhi_dev_ctxt)) {
+			mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+				"Failed to turn on PCIe link.\n");
 			atomic_set(&mhi_dev_ctxt->link_ops_flag, 0);
-		return -EIO;
-	}
-	if (!mhi_dev_ctxt->link_up) {
-		mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
-			"Link is not up, nothing to do.\n");
+			return -EIO;
+		}
+		if (!mhi_dev_ctxt->link_up) {
+			mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
+				"Link is not up, nothing to do.\n");
 			atomic_set(&mhi_dev_ctxt->link_ops_flag, 0);
-		return 0;
-	}
-
-	if (mhi_dev_ctxt->pending_M3) {
-		mhi_log(MHI_MSG_CRITICAL,
-			"Device did not ACK previous suspend request MHI STATE is 0x%x\n",
-			mhi_dev_ctxt->mhi_state);
-			atomic_set(&mhi_dev_ctxt->link_ops_flag, 0);
-		return -ENETRESET;
+			return 0;
 		}
 
-	mhi_initiate_M0(mhi_devices.device_list[0].mhi_ctxt);
+		if (mhi_dev_ctxt->pending_M3) {
+			mhi_log(MHI_MSG_CRITICAL,
+				"Device did not ACK previous suspend request MHI STATE is 0x%x\n",
+				mhi_dev_ctxt->mhi_state);
+				atomic_set(&mhi_dev_ctxt->link_ops_flag, 0);
+				return -ENETRESET;
+			}
 
-	r = wait_event_interruptible_timeout(*mhi_devices.device_list[0].mhi_ctxt->M0_event,
-		mhi_devices.device_list[0].mhi_ctxt->mhi_state != MHI_STATE_M3,
-		msecs_to_jiffies(MHI_MAX_RESUME_TIMEOUT));
-	switch(r) {
-	case 0:
-		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
-			"MDM failed to resume after 0x%x ms\n",
-			MHI_MAX_RESUME_TIMEOUT);
-		r = -ETIMEDOUT;
-		break;
-	case -ERESTARTSYS:
-		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
-			"Going Down...\n");
-		r = -ENETRESET;
-		break;
-	default:
-		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
-				"M0 event received\n");
-		r = 0;
-		break;
-		}
+		mhi_initiate_M0(mhi_devices.device_list[0].mhi_ctxt);
+
+		r = wait_event_interruptible_timeout(*mhi_devices.device_list[0].mhi_ctxt->M0_event,
+			mhi_devices.device_list[0].mhi_ctxt->mhi_state != MHI_STATE_M3,
+			msecs_to_jiffies(MHI_MAX_RESUME_TIMEOUT));
+		switch(r) {
+		case 0:
+			mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+					"MDM failed to resume after %d ms\n",
+				MHI_MAX_RESUME_TIMEOUT);
+			r = -ETIMEDOUT;
+			break;
+		case -ERESTARTSYS:
+			mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+				"Going Down...\n");
+			r = -ENETRESET;
+			break;
+		default:
+			mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+					"M0 event received\n");
+			r = 0;
+			break;
+			}
 		atomic_set(&mhi_dev_ctxt->link_ops_flag, 0);
 	} else {
 		mhi_log(MHI_MSG_INFO| MHI_DBG_POWER,
