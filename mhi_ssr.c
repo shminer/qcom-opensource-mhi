@@ -238,6 +238,10 @@ int mhi_ssr_notify_cb(struct notifier_block *nb,
 	case SUBSYS_BEFORE_SHUTDOWN:
 		mhi_log(MHI_MSG_INFO,
 		"Received Subsystem event BEFORE_SHUTDOWN\n");
+		break;
+	case SUBSYS_AFTER_SHUTDOWN:
+		mhi_log(MHI_MSG_INFO,
+			"Received Subsystem event AFTER_SHUTDOWN\n");
 	while (--max_retries) {
 		if (!atomic_cmpxchg(&mhi_dev_ctxt->link_ops_flag, 0, 1)) {
 			mhi_log(MHI_MSG_CRITICAL,
@@ -264,16 +268,6 @@ int mhi_ssr_notify_cb(struct notifier_block *nb,
 				"Could not acquire critical section, waiting.\n");
 		}
 	}
-		break;
-	case SUBSYS_AFTER_SHUTDOWN:
-		mhi_log(MHI_MSG_INFO,
-			"Received Subsystem event AFTER_SHUTDOWN\n");
-		mhi_notify_clients(mhi_dev_ctxt, MHI_CB_MHI_DISABLED);
-		if (MHI_STATUS_SUCCESS !=
-				mhi_process_link_down(mhi_dev_ctxt)) {
-			mhi_log(MHI_MSG_CRITICAL,
-				"Failed to process link down\n");
-		}
 		break;
 	case SUBSYS_BEFORE_POWERUP:
 		mhi_log(MHI_MSG_VERBOSE,
