@@ -16,8 +16,14 @@
 #define TRB_MAX_DATA_SIZE 0x1000
 
 UCI_DBG_LEVEL mhi_uci_msg_lvl = UCI_DBG_CRITICAL;
+UCI_DBG_LEVEL mhi_uci_ipc_log_lvl = UCI_DBG_VERBOSE;
+void *mhi_uci_ipc_log;
+#define MHI_UCI_IPC_LOG_PAGES (10)
+
 module_param(mhi_uci_msg_lvl , uint, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(mhi_uci_msg_lvl, "uci dbg lvl");
+module_param(mhi_uci_ipc_log_lvl , uint, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(mhi_uci_ipc_log_lvl, "uci dbg lvl");
 
 static ssize_t mhi_uci_client_read(struct file *file, char __user *buf,
 		size_t count, loff_t *offp);
@@ -236,15 +242,14 @@ static ssize_t mhi_uci_client_read(struct file *file, char __user *buf,
 	    0 == uspace_buf_size || NULL == file->private_data)
 		return -EINVAL;
 
-	mhi_uci_log(UCI_DBG_VERBOSE,
-		"Client attempted read on chan %d\n", chan);
 	uci_handle = file->private_data;
 	client_handle = uci_handle->inbound_handle;
 	mutex = &mhi_uci_ctxt.client_chan_lock[uci_handle->in_chan];
 	chan = uci_handle->in_chan;
 	mutex_lock(mutex);
 	buf_size = mhi_uci_ctxt.channel_attributes[chan].max_packet_size;
-
+	mhi_uci_log(UCI_DBG_VERBOSE,
+		    "Client attempted read on chan %d buf_size 0x%x\n", chan, buf_size);
 	do {
 		mhi_poll_inbound(client_handle,
 				&phy_buf,
@@ -401,7 +406,11 @@ static ssize_t mhi_uci_client_write(struct file *file,
 
 int mhi_uci_init(void)
 {
-    return platform_driver_register(&mhi_uci_driver);
+	mhi_uci_ipc_log = ipc_log_context_create(MHI_UCI_IPC_LOG_PAGES, "mhi-uci", 0);
+	if (mhi_uci_ipc_log == NULL) {
+		mhi_uci_log(UCI_DBG_WARNING, "Failed to create IPC logging context\n");
+	}
+	return platform_driver_register(&mhi_uci_driver);
 }
 int mhi_uci_remove(struct platform_device* dev)
 {
