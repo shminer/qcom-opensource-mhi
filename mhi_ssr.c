@@ -241,7 +241,7 @@ int mhi_ssr_notify_cb(struct notifier_block *nb,
 		if (ret_val != MHI_STATUS_SUCCESS)
 			mhi_log(MHI_MSG_INFO,
 				"Could not reset MHI, ret: %d\n", ret_val);
-		atomic_set(&mhi_dev_ctxt->link_ops_flag, 0);
+
 		break;
 	case SUBSYS_BEFORE_SHUTDOWN:
 		mhi_log(MHI_MSG_INFO,
@@ -280,6 +280,7 @@ int mhi_ssr_notify_cb(struct notifier_block *nb,
 	case SUBSYS_BEFORE_POWERUP:
 		mhi_log(MHI_MSG_VERBOSE,
 		"Received Subsystem event BEFORE_POWERUP\n");
+		atomic_set(&mhi_dev_ctxt->link_ops_flag, 0);
 		break;
 	case SUBSYS_RAMDUMP_NOTIFICATION:
 		mhi_log(MHI_MSG_VERBOSE,
