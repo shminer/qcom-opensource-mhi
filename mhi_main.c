@@ -1233,6 +1233,16 @@ int mhi_deassert_device_wake(mhi_device_ctxt *mhi_dev_ctxt)
 {
 	mhi_log(MHI_MSG_VERBOSE, "GPIO %d\n",
 			mhi_dev_ctxt->dev_props->device_wake_gpio);
-	gpio_direction_output(mhi_dev_ctxt->dev_props->device_wake_gpio, 0);
+	if (mhi_dev_ctxt->enable_lpm)
+		gpio_direction_output(mhi_dev_ctxt->dev_props->device_wake_gpio, 0);
+	else
+		mhi_log(MHI_MSG_VERBOSE, "LPM Enabled\n");
+	return 0;
+}
+
+int mhi_set_lpm(mhi_client_handle *client_handle, int enable_lpm)
+{
+	mhi_log(MHI_MSG_VERBOSE, "LPM Set %d\n", enable_lpm);
+	client_handle->mhi_dev_ctxt->enable_lpm = enable_lpm ? 1 : 0;
 	return 0;
 }

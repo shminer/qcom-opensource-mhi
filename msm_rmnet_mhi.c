@@ -799,6 +799,9 @@ static int rmnet_mhi_ioctl_extended(struct net_device *dev, struct ifreq *ifr)
 		strlcpy(ext_cmd.u.if_name, RMNET_MHI_DRIVER_NAME,
 			sizeof(ext_cmd.u.if_name));
 		break;
+	case RMNET_IOCTL_SET_SLEEP_STATE:
+		mhi_set_lpm(rmnet_mhi_ptr->tx_client_handle, ext_cmd.u.data);
+		break;
 	default:
 		rc = -EINVAL;
 		break;

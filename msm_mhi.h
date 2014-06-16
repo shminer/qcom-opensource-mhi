@@ -139,5 +139,6 @@ int mhi_get_max_buffers(mhi_client_handle *client_handle);
 
 int mhi_uci_init(void);
 int rmnet_mhi_init(void);
+int mhi_set_lpm(mhi_client_handle *client_handle, int enable_lpm);
 
 #endif
