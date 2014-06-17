@@ -380,6 +380,11 @@ MHI_STATUS mhi_turn_off_pcie_link(mhi_device_ctxt *mhi_dev_ctxt)
 		ret_val = MHI_STATUS_ERROR;
 		goto exit;
 	}
+	r = msm_pcie_shadow_control(mhi_dev_ctxt->dev_info->pcie_device, 0);
+	if (r)
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+			"Failed to stop shadow config space: %d\n", r);
+
 	r = pci_set_power_state(mhi_dev_ctxt->dev_info->pcie_device, PCI_D3hot);
 	if (r) {
 		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
