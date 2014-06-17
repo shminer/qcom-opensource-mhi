@@ -282,12 +282,6 @@ typedef enum MHI_EVENT_CCS {
 	MHI_EVENT_CC_RING_EL_ERR = 0x11,
 } MHI_EVENT_CCS;
 
-typedef enum MHI_THREAD_STATE {
-	MHI_THREAD_STATE_SUSPENDED = 0,
-	MHI_THREAD_STATE_RUNNING = 1,
-	MHI_THREAD_STATE_EXIT = 2,
-	MHI_THREAD_STATE_reserved = 0x80000000
-} MHI_THREAD_STATE;
 
 
 typedef struct mhi_ring {
@@ -409,8 +403,10 @@ struct mhi_device_ctxt {
 	spinlock_t *mhi_ev_spinlock_list;
 	struct mutex *mhi_cmd_mutex_list;
 	mhi_client_handle *client_handle_list[MHI_MAX_CHANNELS];
-	osal_thread *event_thread_handle;
-	osal_thread *state_change_thread_handle;
+	struct task_struct *event_thread_handle;
+	struct task_struct *st_thread_handle;
+	u32 ev_thread_stopped;
+	u32 st_thread_stopped;
 	wait_queue_head_t *event_handle;
 	wait_queue_head_t *state_change_event_handle;
 	wait_queue_head_t *M0_event;
@@ -420,8 +416,6 @@ struct mhi_device_ctxt {
 	u32 mhi_chan_db_order[MHI_MAX_CHANNELS];
 	spinlock_t *db_write_lock;
 	u32 mhi_ev_db_order[MHI_MAX_CHANNELS];
-	MHI_THREAD_STATE event_thread_state;
-	MHI_THREAD_STATE state_change_thread_state;
 	struct platform_device *mhi_uci_dev;
 	struct platform_device *mhi_rmnet_dev;
 	atomic_t link_ops_flag;
@@ -503,10 +497,8 @@ MHI_STATUS mhi_init_sync(mhi_device_ctxt *mhi_dev_ctxt);
 MHI_STATUS mhi_init_ctrl_zone(mhi_pcie_dev_info *dev_info,
 				mhi_device_ctxt *mhi_dev_ctxt);
 
-MHI_STATUS mhi_init_threads(mhi_device_ctxt *mhi_dev_ctxt);
 MHI_STATUS mhi_init_events(mhi_device_ctxt *mhi_dev_ctxt);
 
-MHI_STATUS mhi_reset(mhi_device_ctxt *mhi_dev_ctxt);
 MHI_STATUS mhi_send_cmd(mhi_device_ctxt *dest_device,
 			MHI_COMMAND which_cmd, u32 chan);
 

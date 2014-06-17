@@ -123,6 +123,12 @@ MHI_STATUS mhi_process_link_down(mhi_device_ctxt *mhi_dev_ctxt)
 		write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 		//mhi_notify_clients(mhi_dev_ctxt, MHI_CB_MHI_DISABLED);
 	mhi_dev_ctxt->mhi_initialized = 0;
+	mhi_log(MHI_MSG_CRITICAL, "Waiting for threads to SUSPEND\n");
+	while(!mhi_dev_ctxt->st_thread_stopped || !mhi_dev_ctxt->ev_thread_stopped) {
+		wake_up_interruptible(mhi_dev_ctxt->event_handle);
+		wake_up_interruptible(mhi_dev_ctxt->state_change_event_handle);
+		mhi_log(MHI_MSG_INFO, "Waiting for threads to SUSPEND\n");
+	}
 	r =
 	msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client, 0);
 	if (r)
@@ -171,7 +177,6 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify)
 			mhi_log(MHI_MSG_INFO,
 				"Received Link Up Callback\n");
 		}
-
 		mhi_pcie_dev->link_up_cntr++;
 		break;
 	case MSM_PCIE_EVENT_WAKEUP:

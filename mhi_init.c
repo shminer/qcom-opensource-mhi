@@ -19,24 +19,10 @@ MHI_STATUS mhi_clean_init_stage(mhi_device_ctxt *mhi_dev_ctxt,
 {
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
 	switch (cleanup_stage) {
-		u32 wait_counter = 0;
 	case MHI_INIT_ERROR_STAGE_UNWIND_ALL:
-		mhi_dev_ctxt->kill_threads = 1;
-		while (MHI_THREAD_STATE_EXIT !=
-				mhi_dev_ctxt->event_thread_state &&
-				MHI_THREAD_STATE_EXIT !=
-				mhi_dev_ctxt->state_change_thread_state &&
-				wait_counter <  MHI_MAX_LINK_RETRIES) {
-			usleep(1000);
-			wait_counter++;
-		}
-		if (wait_counter == MHI_MAX_LINK_RETRIES)
-			mhi_log(MHI_MSG_ERROR, "Failed to stop threads\n");
 	case MHI_INIT_ERROR_STAGE_DEVICE_CTRL:
 		mhi_freememregion(mhi_dev_ctxt->mhi_ctrl_seg_info);
 	case MHI_INIT_ERROR_STAGE_THREAD_QUEUES:
-		kfree(mhi_dev_ctxt->state_change_thread_handle);
-		kfree(mhi_dev_ctxt->event_thread_handle);
 	case MHI_INIT_ERROR_STAGE_THREADS:
 		kfree(mhi_dev_ctxt->event_handle);
 		kfree(mhi_dev_ctxt->state_change_event_handle);
@@ -95,12 +81,6 @@ MHI_STATUS mhi_init_device_ctxt(mhi_pcie_dev_info *dev_info,
 		mhi_clean_init_stage(*mhi_device, MHI_INIT_ERROR_STAGE_EVENTS);
 		return MHI_STATUS_ERROR;
 	}
-	if (MHI_STATUS_SUCCESS != mhi_init_threads(*mhi_device)) {
-		mhi_log(MHI_MSG_ERROR, "Failed to initialize mhi threads\n");
-		mhi_clean_init_stage(*mhi_device,
-					MHI_INIT_ERROR_STAGE_THREADS);
-		return MHI_STATUS_ERROR;
-	}
 	if (MHI_STATUS_SUCCESS != mhi_reset_all_thread_queues(*mhi_device)) {
 		mhi_log(MHI_MSG_ERROR, "Failed to initialize work queues\n");
 		mhi_clean_init_stage(*mhi_device,
@@ -120,7 +100,7 @@ MHI_STATUS mhi_init_device_ctxt(mhi_pcie_dev_info *dev_info,
 		return MHI_STATUS_ERROR;
 	}
 	if (MHI_STATUS_SUCCESS != mhi_spawn_threads(*mhi_device)) {
-		mhi_log(MHI_MSG_ERROR, "mhi_init> Failed to spawn threads\n");
+		mhi_log(MHI_MSG_ERROR, "Failed to spawn threads\n");
 		return MHI_STATUS_ERROR;
 	}
 	if (MHI_STATUS_SUCCESS != mhi_init_timers(*mhi_device)) {
@@ -258,35 +238,6 @@ MHI_STATUS mhi_init_ctrl_zone(mhi_pcie_dev_info *dev_info,
 }
 
 /**
- * @brief Initialize all mhi threads
- *
- * @param mhi_dev_ctxt [IN ] mhi mhi_dev_ctxt context
- *
- * @return MHI_STATUS
- */
-MHI_STATUS mhi_init_threads(mhi_device_ctxt *mhi_dev_ctxt)
-{
-	mhi_dev_ctxt->event_thread_handle = kmalloc(sizeof(osal_thread),
-							GFP_KERNEL);
-	if (NULL == mhi_dev_ctxt->event_thread_handle) {
-		mhi_log(MHI_MSG_ERROR, "Failed to init rx thread handle");
-		return MHI_STATUS_ERROR;
-	}
-	mhi_dev_ctxt->state_change_thread_handle = kmalloc(sizeof(osal_thread),
-								GFP_KERNEL);
-	if (NULL == mhi_dev_ctxt->state_change_thread_handle) {
-		mhi_log(MHI_MSG_ERROR, "Failed to init STT handle");
-		goto error_state_change_thread_handle_alloc;
-	}
-
-	return MHI_STATUS_SUCCESS;
-
-error_state_change_thread_handle_alloc:
-	kfree(mhi_dev_ctxt->event_thread_handle);
-	return MHI_STATUS_ERROR;
-}
-
-/**
  * @brief Spawn all the MHI threads
  *
  * @param mhi_dev_ctxt mhi mhi_dev_ctxt context
@@ -296,23 +247,16 @@ error_state_change_thread_handle_alloc:
  */
 MHI_STATUS mhi_spawn_threads(mhi_device_ctxt *mhi_dev_ctxt)
 {
-	/* Spawn the XFER thread */
-	if (MHI_STATUS_SUCCESS != mhi_spawn_thread(mhi_dev_ctxt,
-				parse_event_thread,
-				mhi_dev_ctxt->event_thread_handle,
-				"MHI_EV_THREAD")) {
-		mhi_log(MHI_MSG_ERROR, "Failed to start xfer thread");
+	mhi_dev_ctxt->event_thread_handle = kthread_run(parse_event_thread,
+							mhi_dev_ctxt,
+							"MHI_EV_THREAD");
+	if (-ENOMEM == (int)mhi_dev_ctxt->event_thread_handle)
 		return MHI_STATUS_ERROR;
-	}
-
-	/* Spawn the MST thread */
-	if (MHI_STATUS_SUCCESS != mhi_spawn_thread(mhi_dev_ctxt,
-				mhi_state_change_thread,
-				mhi_dev_ctxt->state_change_thread_handle,
-				"MHI_STATE_THREAD")) {
-		mhi_log(MHI_MSG_ERROR, " Failed to start state thread");
+	mhi_dev_ctxt->st_thread_handle = kthread_run(mhi_state_change_thread,
+							mhi_dev_ctxt,
+							"MHI_STATE_THREAD");
+	if (-ENOMEM == (int)mhi_dev_ctxt->event_thread_handle)
 		return MHI_STATUS_ERROR;
-	}
 	return MHI_STATUS_SUCCESS;
 }
 /**
