@@ -11,7 +11,7 @@
  */
 
 #include "mhi_sys.h"
-MHI_DEBUG_LEVEL mhi_msg_lvl = MHI_MSG_CRITICAL;
+MHI_DEBUG_LEVEL mhi_msg_lvl = MHI_MSG_INFO;
 MHI_DEBUG_LEVEL mhi_ipc_log_lvl = MHI_MSG_INFO;
 MHI_DEBUG_CLASS mhi_msg_class = MHI_DBG_DATA | MHI_DBG_POWER;
 
@@ -22,6 +22,9 @@ MODULE_PARM_DESC(mhi_ipc_log_lvl, "dbg lvl");
 
 module_param(mhi_msg_class , uint, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(mhi_msg_class, "dbg class");
+u32 m3_timer_val_ms = 1000;
+module_param(m3_timer_val_ms, uint, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(m3_timer_val_ms, "timer val");
 
 static ssize_t mhi_dbgfs_chan_read(struct file *fp, char __user *buf,
 				size_t count, loff_t *offp);
@@ -104,25 +107,31 @@ static ssize_t mhi_dbgfs_state_read(struct file *fp, char __user *buf,
 	amnt_copied =
 	scnprintf(chan_info,
 			sizeof(chan_info),
-			"%s %u %s %d %s %d %s %d %s %d %s %d %s %d %s %d %s %d\n",
+			"%s %u %s %d %s %d %s %d %s %d %s %d %s %d %s %d %s %d %s %d %s %d, %s, %d\n",
 			"Our State:",
 			mhi_dev_ctxt->mhi_state,
 			"M0->M1:",
-			mhi_dev_ctxt->m0_m1,
+			mhi_dev_ctxt->counters.m0_m1,
 			"M0<-M1:",
-			mhi_dev_ctxt->m1_m0,
+			mhi_dev_ctxt->counters.m1_m0,
 			"M1->M2:",
-			mhi_dev_ctxt->m1_m2,
+			mhi_dev_ctxt->counters.m1_m2,
 			"M0<-M2:",
-			mhi_dev_ctxt->m2_m0,
+			mhi_dev_ctxt->counters.m2_m0,
 			"M0->M3:",
-			mhi_dev_ctxt->m0_m3,
+			mhi_dev_ctxt->counters.m0_m3,
 			"M0<-M3:",
-			mhi_dev_ctxt->m3_m0,
-			"M3 Event Timeouts:",
-			mhi_dev_ctxt->m3_event_timeouts,
-			"M0 Event Timeouts:",
-			mhi_dev_ctxt->m0_event_timeouts);
+			mhi_dev_ctxt->counters.m3_m0,
+			"M3_ev_TO:",
+			mhi_dev_ctxt->counters.m3_event_timeouts,
+			"M0_ev_TO:",
+			mhi_dev_ctxt->counters.m0_event_timeouts,
+			"MSI_d:",
+			mhi_dev_ctxt->counters.msi_disable_cntr,
+			"MSI_e:",
+			mhi_dev_ctxt->counters.msi_enable_cntr,
+			"outstanding_acks:",
+			atomic_read(&mhi_dev_ctxt->counters.outbound_acks));
 	if (amnt_copied < count)
 		return amnt_copied - copy_to_user(buf, chan_info, amnt_copied);
 	else
@@ -204,7 +213,10 @@ static ssize_t mhi_dbgfs_ev_read(struct file *fp, char __user *buf,
 	*offp = (u32)(*offp) % EVENT_RINGS_ALLOCATED;
 	event_ring_index = mhi_dev_ctxt->alloced_ev_rings[*offp];
 	ev_ctxt = &mhi_dev_ctxt->mhi_ctrl_seg->mhi_ec_list[event_ring_index];
-	if (*offp == (EVENT_RINGS_ALLOCATED - 1)) msleep(000);
+	if (*offp == (EVENT_RINGS_ALLOCATED - 1))
+	{
+		msleep(1000);
+	}
 
 
 	get_element_index(&mhi_dev_ctxt->mhi_local_event_ctxt[event_ring_index],
@@ -313,16 +325,6 @@ void mhi_freememregion(mhi_meminfo *meminfo)
 	meminfo->pa_unaligned = 0;
 	return;
 }
-MHI_STATUS mhi_spawn_thread(void *ctxt, int(fn)(void *),
-			osal_thread *handle, char name[])
-{
-	handle->thread_handle = kthread_run(fn, ctxt, name);
-	if (-ENOMEM == (int)handle->thread_handle)
-		return MHI_STATUS_ERROR;
-	else
-		return MHI_STATUS_SUCCESS;
-}
-
 void print_ring(mhi_ring *local_chan_ctxt, u32 ring_id)
 {
 	u32 i = 0;

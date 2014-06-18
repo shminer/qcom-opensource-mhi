@@ -59,6 +59,7 @@
 #include <linux/cpu.h>
 #include <linux/irq.h>
 #include <linux/pm_wakeup.h>
+#include <linux/workqueue.h>
 
 extern MHI_DEBUG_LEVEL mhi_msg_lvl;
 extern MHI_DEBUG_LEVEL mhi_ipc_log_lvl;
@@ -94,15 +95,6 @@ struct mhi_meminfo {
 	uintptr_t va_unaligned;
 	uintptr_t size;
 };
-
-struct osal_thread {
-	struct task_struct *thread_handle;
-	void *data;
-	const char *name_fmt;
-};
-
-MHI_STATUS mhi_spawn_thread(void *ctxt, int(fn)(void *),
-			osal_thread *handle, char[]);
 
 MHI_STATUS mhi_mallocmemregion(mhi_meminfo *meminfo, size_t size);
 
