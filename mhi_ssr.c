@@ -182,6 +182,7 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify)
 	case MSM_PCIE_EVENT_WAKEUP:
 		mhi_log(MHI_MSG_CRITICAL,
 			"Received MSM_PCIE_WAKEUP_EVENT\n");
+		if (!atomic_cmpxchg(&mhi_dev_ctxt->link_ops_flag, 0, 1)) {
 		mutex_lock(&mhi_dev_ctxt->mhi_link_state);
 		r = msm_pcie_pm_control(MSM_PCIE_RESUME,
 				    mhi_pcie_dev->pcie_device->bus->number,
@@ -207,6 +208,8 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify)
 			}
 		}
 		mutex_unlock(&mhi_dev_ctxt->mhi_link_state);
+			atomic_set(&mhi_dev_ctxt->link_ops_flag, 0);
+		}
 		break;
 	default:
 		mhi_log(MHI_MSG_INFO,
