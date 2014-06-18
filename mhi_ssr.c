@@ -70,13 +70,13 @@ int mhi_esoc_register(mhi_device_ctxt* mhi_dev_ctxt)
 	return ret_val;
 }
 
-
 void mhi_notify_clients(mhi_device_ctxt *mhi_dev_ctxt, MHI_CB_REASON reason)
 {
 	u32 i;
 	mhi_client_handle *client_handle = NULL;
 	mhi_cb_info cb_info = {0};
 	mhi_result result = {0};
+
 	for (i = 0; i < MHI_MAX_CHANNELS; ++i) {
 		if (VALID_CHAN_NR(i)) {
 			client_handle =
@@ -89,62 +89,15 @@ void mhi_notify_clients(mhi_device_ctxt *mhi_dev_ctxt, MHI_CB_REASON reason)
 				cb_info.result = &result;
 				client_handle->client_info.mhi_client_cb(&cb_info);
 			}
-	}
-}
-}
-MHI_STATUS mhi_process_link_down(mhi_device_ctxt *mhi_dev_ctxt)
-{
-	unsigned long flags;
-	MHI_STATUS ret_val;
-	int r;
-	mhi_log(MHI_MSG_INFO, "Entered.\n");
-	if (NULL == mhi_dev_ctxt)
-		return MHI_STATUS_ERROR;
-	switch(hrtimer_try_to_cancel(&mhi_dev_ctxt->inactivity_tmr))
-	{
-	case 0:
-		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
-			"Timer was not active\n");
-		break;
-		case 1:
-			mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
-				"Timer was active\n");
-			break;
-		case -1:
-			mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
-				"Timer executing and can't stop\n");
 		}
-		mhi_log(MHI_MSG_CRITICAL,
-			"Informing clients of MHI that link is down\n");
-		write_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
-		mhi_dev_ctxt->link_up = 0;
-		mhi_dev_ctxt->mhi_state = MHI_STATE_RESET;
-		ret_val = mhi_deassert_device_wake(mhi_dev_ctxt);
-		write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
-		//mhi_notify_clients(mhi_dev_ctxt, MHI_CB_MHI_DISABLED);
-	mhi_dev_ctxt->mhi_initialized = 0;
-	mhi_log(MHI_MSG_CRITICAL, "Waiting for threads to SUSPEND\n");
-	while(!mhi_dev_ctxt->st_thread_stopped || !mhi_dev_ctxt->ev_thread_stopped) {
-		wake_up_interruptible(mhi_dev_ctxt->event_handle);
-		wake_up_interruptible(mhi_dev_ctxt->state_change_event_handle);
-		mhi_log(MHI_MSG_INFO, "Waiting for threads to SUSPEND\n");
 	}
-	r =
-	msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client, 0);
-	if (r)
-		mhi_log(MHI_MSG_INFO,
-			"Failed to scale bus request to sleep set.\n");
-	mhi_dev_ctxt->dev_info->link_down_cntr++;
-	atomic_set(&mhi_dev_ctxt->data_pending, 0);
-	mhi_log(MHI_MSG_INFO, "Exited.\n");
-	return MHI_STATUS_SUCCESS;
 }
+
 void mhi_link_state_cb(struct msm_pcie_notify *notify)
 {
-	int r;
+	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
 	mhi_pcie_dev_info *mhi_pcie_dev = notify->data;
 	mhi_device_ctxt *mhi_dev_ctxt = NULL;
-	mhi_log(MHI_MSG_INFO, "Entered\n");
 	if (NULL == notify || NULL == notify->data) {
 		mhi_log(MHI_MSG_CRITICAL,
 		"Incomplete handle received\n");
@@ -152,17 +105,8 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify)
 	}
 	mhi_dev_ctxt = mhi_pcie_dev->mhi_ctxt;
 	switch (notify->event){
-	case MSM_PCIE_EVENT_NO_ACCESS:
-		mhi_log(MHI_MSG_CRITICAL,
-			"Received NO_ACCESS event\n");
 	case MSM_PCIE_EVENT_LINKDOWN:
-		mhi_log(MHI_MSG_CRITICAL,
-			"Received MSM_PCIE_EVENT_LINKDOWN\n");
-		if (MHI_STATUS_SUCCESS !=
-				mhi_process_link_down(mhi_dev_ctxt)){
-			mhi_log(MHI_MSG_CRITICAL,
-				"Failed to process link down\n");
-		}
+		mhi_log(MHI_MSG_CRITICAL, "Received MSM_PCIE_EVENT_LINKDOWN\n");
 		break;
 	case MSM_PCIE_EVENT_LINKUP:
 		mhi_log(MHI_MSG_CRITICAL,
@@ -173,6 +117,7 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify)
 				mhi_startup_thread(mhi_pcie_dev);
 				mhi_dev_ctxt = mhi_pcie_dev->mhi_ctxt;
 				pci_set_master(mhi_pcie_dev->pcie_device);
+				init_mhi_base_state(mhi_dev_ctxt);
 		} else {
 			mhi_log(MHI_MSG_INFO,
 				"Received Link Up Callback\n");
@@ -181,34 +126,14 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify)
 		break;
 	case MSM_PCIE_EVENT_WAKEUP:
 		mhi_log(MHI_MSG_CRITICAL,
-			"Received MSM_PCIE_WAKEUP_EVENT\n");
-		if (!atomic_cmpxchg(&mhi_dev_ctxt->link_ops_flag, 0, 1)) {
-		mutex_lock(&mhi_dev_ctxt->mhi_link_state);
-		r = msm_pcie_pm_control(MSM_PCIE_RESUME,
-				    mhi_pcie_dev->pcie_device->bus->number,
-				    mhi_pcie_dev->pcie_device, NULL,
-				    MSM_PCIE_CONFIG_NO_CFG_RESTORE | MSM_PCIE_CONFIG_LINKDOWN);
-		if (r) {
+			"Received MSM_PCIE_EVENT_WAKE\n");
+		atomic_set(&mhi_dev_ctxt->flags.pending_wake, 1);
+		ret_val = mhi_init_state_transition(mhi_dev_ctxt,
+				STATE_TRANSITION_WAKE);
+		if (MHI_STATUS_SUCCESS != ret_val) {
 			mhi_log(MHI_MSG_CRITICAL,
-				"Failed to restore PCIe link ret: %d\n", r);
-			mhi_dev_ctxt->link_up = 0;
-		} else {
-			r = msm_pcie_recover_config(mhi_pcie_dev->pcie_device);
-			if (r) {
-				mhi_log(MHI_MSG_CRITICAL,
-				"Failed to restore PCIe config space ret: %d\n", r);
-			} else {
-				r = pci_set_power_state(mhi_dev_ctxt->dev_info->pcie_device, PCI_D0);
-				if (r) {
-					mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
-							"Failed to set power state 0x%x\n", r);
-				} else {
-					mhi_dev_ctxt->link_up = 1;
-				}
-			}
-		}
-		mutex_unlock(&mhi_dev_ctxt->mhi_link_state);
-			atomic_set(&mhi_dev_ctxt->link_ops_flag, 0);
+				"Failed to init state transition, to %d\n",
+				STATE_TRANSITION_WAKE);
 		}
 		break;
 	default:
@@ -217,86 +142,26 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify)
 		return;
 		break;
 		}
-	mhi_log(MHI_MSG_INFO, "Exited\n");
 }
 int mhi_ssr_notify_cb(struct notifier_block *nb,
 			unsigned long action, void *data)
 {
-	unsigned long flags;
 	int ret_val = 0;
-	int max_retries = 5;
 	mhi_device_ctxt *mhi_dev_ctxt = mhi_devices.device_list[0].mhi_ctxt;
 	mhi_pcie_dev_info *mhi_pcie_dev = NULL;
 	mhi_pcie_dev = &mhi_devices.device_list[mhi_devices.nr_of_devices];
-	mhi_log(MHI_MSG_VERBOSE,
-		"Received Subsystem event 0x%lx, from esoc %p\n",
-		action, data);
 	if (NULL != mhi_dev_ctxt)
 		mhi_dev_ctxt->esoc_notif = action;
 	switch (action) {
-	case SUBSYS_AFTER_POWERUP:
-		mhi_log(MHI_MSG_VERBOSE,
-		"Received Subsystem event AFTER_POWERUP\n");
-		ret_val = init_mhi_base_state(mhi_dev_ctxt);
-		if (ret_val != MHI_STATUS_SUCCESS)
-			mhi_log(MHI_MSG_INFO,
-				"Could not reset MHI, ret: %d\n", ret_val);
-
-		break;
-	case SUBSYS_BEFORE_SHUTDOWN:
-		mhi_log(MHI_MSG_INFO,
-		"Received Subsystem event BEFORE_SHUTDOWN\n");
-		break;
 	case SUBSYS_AFTER_SHUTDOWN:
-		mhi_log(MHI_MSG_INFO,
-			"Received Subsystem event AFTER_SHUTDOWN\n");
-	while (--max_retries) {
-		if (!atomic_cmpxchg(&mhi_dev_ctxt->link_ops_flag, 0, 1)) {
+		mhi_log(MHI_MSG_INFO, "Received Subsystem event AFTER_SHUTDOWN\n");
+		ret_val = mhi_init_state_transition(mhi_dev_ctxt,
+				STATE_TRANSITION_LINK_DOWN);
+		if (MHI_STATUS_SUCCESS != ret_val) {
 			mhi_log(MHI_MSG_CRITICAL,
-					"Acquired critical section\n");
-			write_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
-			mhi_dev_ctxt->mhi_state = MHI_STATE_RESET;
-			ret_val = mhi_assert_device_wake(mhi_dev_ctxt);
-			write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
-			mhi_notify_clients(mhi_dev_ctxt, MHI_CB_MHI_DISABLED);
-			mhi_dev_ctxt->mhi_initialized = 0;
-			mhi_pcie_dev->link_down_cntr++;
-			ret_val = msm_pcie_pm_control(MSM_PCIE_SUSPEND,
-					    mhi_dev_ctxt->dev_info->pcie_device->bus->number,
-					    mhi_dev_ctxt->dev_info->pcie_device, NULL,
-					    MSM_PCIE_CONFIG_NO_CFG_RESTORE);
-			if (ret_val)
-				mhi_log(MHI_MSG_CRITICAL,
-					"Failed to suspend link\n");
-			mhi_dev_ctxt->link_up = 0;
-			return 0;
-		} else {
-			msleep(10);
-			mhi_log(MHI_MSG_CRITICAL,
-				"Could not acquire critical section, waiting.\n");
+				"Failed to init state transition, to %d\n",
+				STATE_TRANSITION_LINK_DOWN);
 		}
-	}
-		break;
-	case SUBSYS_BEFORE_POWERUP:
-		mhi_log(MHI_MSG_VERBOSE,
-		"Received Subsystem event BEFORE_POWERUP\n");
-		atomic_set(&mhi_dev_ctxt->link_ops_flag, 0);
-		break;
-	case SUBSYS_RAMDUMP_NOTIFICATION:
-		mhi_log(MHI_MSG_VERBOSE,
-		"Received Subsystem event RAMDUMP_NOTIFICATION\n");
-		break;
-	case SUBSYS_PROXY_VOTE:
-		mhi_log(MHI_MSG_VERBOSE,
-		"Received Subsystem event SYBSYS_PROXY_VOTE\n");
-		break;
-	case SUBSYS_PROXY_UNVOTE:
-		mhi_log(MHI_MSG_VERBOSE,
-		"Received Subsystem event SYBSYS_PROXY_UNVOTE\n");
-		break;
-	case SUBSYS_POWERUP_FAILURE:
-		mhi_log(MHI_MSG_VERBOSE,
-		"Received Subsystem event SYBSYS_POWERUP_FAILURE\n");
 		break;
 	}
 	return NOTIFY_OK;
@@ -308,7 +173,7 @@ MHI_STATUS init_mhi_base_state(mhi_device_ctxt* mhi_dev_ctxt)
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
 
 	mhi_assert_device_wake(mhi_dev_ctxt);
-	mhi_dev_ctxt->link_up = 1;
+	mhi_dev_ctxt->flags.link_up = 1;
 	r =
 	msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client, 1);
 	if (r)

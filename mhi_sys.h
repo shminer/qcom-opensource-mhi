@@ -59,6 +59,7 @@
 #include <linux/cpu.h>
 #include <linux/irq.h>
 #include <linux/pm_wakeup.h>
+#include <linux/workqueue.h>
 
 extern MHI_DEBUG_LEVEL mhi_msg_lvl;
 extern MHI_DEBUG_LEVEL mhi_ipc_log_lvl;

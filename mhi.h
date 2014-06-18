@@ -30,6 +30,7 @@ typedef struct device device;
 typedef struct mhi_device_ctxt mhi_device_ctxt;
 typedef struct mhi_pcie_devices mhi_pcie_devices;
 typedef struct hrtimer hrtimer;
+typedef struct pci_saved_state pci_saved_state;
 extern mhi_pcie_devices mhi_devices;
 
 typedef enum MHI_DEBUG_CLASS {
@@ -59,6 +60,7 @@ typedef struct pcie_core_info {
 	u32 device_wake_gpio;
 	u32 irq_base;
 	u32 max_nr_msis;
+	pci_saved_state *pcie_state;
 } pcie_core_info;
 
 typedef struct bhi_ctxt_t {
@@ -282,8 +284,6 @@ typedef enum MHI_EVENT_CCS {
 	MHI_EVENT_CC_RING_EL_ERR = 0x11,
 } MHI_EVENT_CCS;
 
-
-
 typedef struct mhi_ring {
 	void *base;
 	void *volatile wp;
@@ -329,6 +329,8 @@ typedef enum STATE_TRANSITION {
 	STATE_TRANSITION_BHI = 0x6,
 	STATE_TRANSITION_SBL = 0x7,
 	STATE_TRANSITION_AMSS = 0x8,
+	STATE_TRANSITION_LINK_DOWN = 0x9,
+	STATE_TRANSITION_WAKE = 0xA,
 	STATE_TRANSITION_SYS_ERR = 0xFF,
 	STATE_TRANSITION_reserved = 0x80000000
 } STATE_TRANSITION;
@@ -359,7 +361,7 @@ typedef enum MHI_EVENT_POLLING {
 } MHI_EVENT_POLLING;
 
 typedef struct mhi_state_work_queue {
-	struct mutex *q_mutex;
+	spinlock_t *q_lock;
 	mhi_ring q_info;
 	u32 queue_full_cntr;
 	STATE_TRANSITION buf[MHI_WORK_Q_MAX_SIZE];
@@ -375,11 +377,46 @@ typedef struct mhi_control_seg {
 	u32 padding;
 } mhi_control_seg;
 
-typedef struct mhi_counters {
+typedef struct mhi_chan_counters {
 	u32 empty_ring_removal;
 	u32 pkts_xferd;
 	u32 ev_processed;
+} mhi_chan_counters;
+
+typedef struct mhi_counters {
+	u32 m0_m1;
+	u32 m1_m0;
+	u32 m1_m2;
+	u32 m2_m0;
+	u32 m0_m3;
+	u32 m3_m0;
+	u32 m1_m3;
+	u32 mhi_reset_cntr;
+	u32 mhi_ready_cntr;
+	u32 m3_event_timeouts;
+	u32 m0_event_timeouts;
+	u32 msi_disable_cntr;
+	u32 msi_enable_cntr;
+	u32 nr_irq_migrations;
+	atomic_t outbound_acks;
 } mhi_counters;
+
+typedef struct mhi_flags {
+	u32 mhi_initialized;
+	u32 mhi_clients_probed;
+	volatile u32 pending_M3;
+	volatile u32 pending_M0;
+	u32 link_up;
+	volatile u32 kill_threads;
+	atomic_t mhi_link_off;
+	atomic_t data_pending;
+	atomic_t events_pending;
+	atomic_t m0_work_enabled;
+	atomic_t m3_work_enabled;
+	atomic_t pending_wake;
+	volatile int stop_threads;
+	u32 ssr;
+} mhi_flags;
 
 struct mhi_device_ctxt {
 	mhi_pcie_dev_info *dev_info;
@@ -405,28 +442,25 @@ struct mhi_device_ctxt {
 	mhi_client_handle *client_handle_list[MHI_MAX_CHANNELS];
 	struct task_struct *event_thread_handle;
 	struct task_struct *st_thread_handle;
-	u32 ev_thread_stopped;
-	u32 st_thread_stopped;
+	volatile u32 ev_thread_stopped;
+	volatile u32 st_thread_stopped;
 	wait_queue_head_t *event_handle;
 	wait_queue_head_t *state_change_event_handle;
 	wait_queue_head_t *M0_event;
 	wait_queue_head_t *M3_event;
 	wait_queue_head_t *chan_start_complete;
-	u32 pending_M3;
+
 	u32 mhi_chan_db_order[MHI_MAX_CHANNELS];
-	spinlock_t *db_write_lock;
 	u32 mhi_ev_db_order[MHI_MAX_CHANNELS];
+	spinlock_t *db_write_lock;
+
 	struct platform_device *mhi_uci_dev;
 	struct platform_device *mhi_rmnet_dev;
 	atomic_t link_ops_flag;
 
-	volatile u32 kill_threads;
 	mhi_state_work_queue state_change_work_item_list;
 	MHI_CMD_STATUS mhi_chan_pend_cmd_ack[MHI_MAX_CHANNELS];
-	atomic_t data_pending;
-	u32 mhi_initialized;
-	u32 mhi_clients_probed;
-	atomic_t events_pending;
+
 	atomic_t start_cmd_pending_ack;
 	u32 cmd_ring_order;
 	u32 alloced_ev_rings[EVENT_RINGS_ALLOCATED];
@@ -434,20 +468,17 @@ struct mhi_device_ctxt {
 	u32 msi_counter[EVENT_RINGS_ALLOCATED];
 	u32 hw_intmod_rate;
 	u32 outbound_evmod_rate;
-	u32 m0_m1;
-	u32 m1_m0;
-	u32 m1_m2;
-	u32 m2_m0;
-	u32 m0_m3;
-	u32 m3_m0;
-	u32 mhi_reset_cntr;
-	u32 mhi_ready_cntr;
-	u32 m3_event_timeouts;
-	u32 m0_event_timeouts;
+	mhi_counters counters;
+	mhi_flags flags;
+
 	rwlock_t xfer_lock;
-	hrtimer inactivity_tmr;
-	ktime_t inactivity_timeout;
-	mhi_counters mhi_chan_cntr[MHI_MAX_CHANNELS];
+	hrtimer m1_timer;
+	ktime_t m1_timeout;
+	struct delayed_work m3_work;
+	struct work_struct m0_work;
+
+	struct workqueue_struct *work_queue;
+	mhi_chan_counters mhi_chan_cntr[MHI_MAX_CHANNELS];
 	u32 ev_counter[MHI_MAX_CHANNELS];
 	struct msm_bus_scale_pdata bus_scale_table;
 	struct msm_bus_vectors bus_vectors[2];
@@ -457,12 +488,11 @@ struct mhi_device_ctxt {
 	void *esoc_ssr_handle;
 
 	struct notifier_block mhi_cpu_notifier;
-	u32 nr_irq_migrations;
-	u32 link_up;
-	u32 clients_probed;
+
 	unsigned long esoc_notif;
 	STATE_TRANSITION base_state;
 	atomic_t outbound_acks;
+	struct mutex pm_lock;
 	struct wakeup_source wake_lock;
 };
 
@@ -549,9 +579,6 @@ MHI_STATUS mhi_test_for_device_ready(mhi_device_ctxt *mhi_dev_ctxt);
 MHI_STATUS validate_ring_el_addr(mhi_ring *ring, uintptr_t addr);
 MHI_STATUS validate_ev_el_addr(mhi_ring *ring, uintptr_t addr);
 
-MHI_STATUS mhi_spawn_threads(mhi_device_ctxt *mhi_dev_ctxt);
-
-
 MHI_STATUS reset_chan_cmd(mhi_device_ctxt *mhi_dev_ctxt, mhi_cmd_pkt *cmd_pkt);
 MHI_STATUS start_chan_cmd(mhi_device_ctxt *mhi_dev_ctxt, mhi_cmd_pkt *cmd_pkt);
 MHI_STATUS parse_outbound(mhi_device_ctxt *mhi_dev_ctxt, u32 chan,
@@ -586,11 +613,13 @@ MHI_STATUS process_AMSS_transition(mhi_device_ctxt *mhi_dev_ctxt,
 				STATE_TRANSITION cur_work_item);
 MHI_STATUS process_SBL_transition(mhi_device_ctxt *mhi_dev_ctxt,
 				STATE_TRANSITION cur_work_item);
+MHI_STATUS process_LINK_DOWN_transition(mhi_device_ctxt *mhi_dev_ctxt,
+			STATE_TRANSITION cur_work_item);
+MHI_STATUS process_WAKE_transition(mhi_device_ctxt *mhi_dev_ctxt,
+			STATE_TRANSITION cur_work_item);
 MHI_STATUS mhi_wait_for_mdm(mhi_device_ctxt *mhi_dev_ctxt);
 void conditional_chan_db_write(mhi_device_ctxt *mhi_dev_ctxt, u32 chan);
 void ring_all_ev_dbs(mhi_device_ctxt *mhi_dev_ctxt);
-int mhi_initiate_M3(mhi_device_ctxt *mhi_dev_ctxt);
-int mhi_initiate_M0(mhi_device_ctxt *mhi_dev_ctxt);
 enum hrtimer_restart mhi_initiate_M1(struct hrtimer *timer);
 int mhi_suspend(struct pci_dev *dev, pm_message_t state);
 int mhi_resume(struct pci_dev *dev);
@@ -619,4 +648,14 @@ MHI_STATUS init_mhi_base_state(mhi_device_ctxt* mhi_dev_ctxt);
 MHI_STATUS mhi_turn_off_pcie_link(mhi_device_ctxt *mhi_dev_ctxt);
 MHI_STATUS mhi_turn_on_pcie_link(mhi_device_ctxt *mhi_dev_ctxt);
 
+void delayed_m3(struct work_struct *work);
+MHI_STATUS mhi_notify_device(mhi_device_ctxt *mhi_dev_ctxt, u32 chan);
+MHI_STATUS mhi_init_work_queues(mhi_device_ctxt *mhi_dev_ctxt);
+void mhi_set_m_state(mhi_device_ctxt *mhi_dev_ctxt, MHI_STATE new_state);
+void m0_work(struct work_struct *work);
+MHI_STATUS mhi_spawn_threads(mhi_device_ctxt *mhi_dev_ctxt);
+MHI_STATUS mhi_wake_dev_from_m3(mhi_device_ctxt *mhi_dev_ctxt);
+MHI_STATUS mhi_process_link_down(mhi_device_ctxt *mhi_dev_ctxt);
+int mhi_initiate_m0(mhi_device_ctxt *mhi_dev_ctxt);
+int mhi_initiate_m3(mhi_device_ctxt *mhi_dev_ctxt);
 #endif
