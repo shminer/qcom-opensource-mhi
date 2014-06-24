@@ -280,6 +280,8 @@ typedef enum MHI_EVENT_CCS {
 	MHI_EVENT_CC_EOT = 0x2,
 	MHI_EVENT_CC_OVERFLOW = 0x3,
 	MHI_EVENT_CC_EOB = 0x4,
+	MHI_EVENT_CC_OOB = 0x5,
+	MHI_EVENT_CC_DB_MODE = 0x6,
 	MHI_EVENT_CC_UNDEFINED_ERR = 0x10,
 	MHI_EVENT_CC_RING_EL_ERR = 0x11,
 } MHI_EVENT_CCS;
@@ -466,6 +468,8 @@ struct mhi_device_ctxt {
 	u32 alloced_ev_rings[EVENT_RINGS_ALLOCATED];
 	u32 ev_ring_props[EVENT_RINGS_ALLOCATED];
 	u32 msi_counter[EVENT_RINGS_ALLOCATED];
+	u32 db_mode[MHI_MAX_CHANNELS];
+	u32 uldl_enabled;
 	u32 hw_intmod_rate;
 	u32 outbound_evmod_rate;
 	mhi_counters counters;
