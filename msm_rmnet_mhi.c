@@ -185,8 +185,9 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 		mhi_result *result =
 		      mhi_poll(rmnet_mhi_ptr->rx_client_handle);
 
-		/* Failure from MHI core */
-		if (unlikely (MHI_STATUS_SUCCESS != result->transaction_status)) {
+		if(result->transaction_status == MHI_STATUS_DEVICE_NOT_READY) {
+			continue;
+		} else if (result->transaction_status != MHI_STATUS_SUCCESS) {
 			/* TODO: Handle error */
 			pr_err("%s: mhi_poll failed, error is %d",
 			       __func__, result->transaction_status);
