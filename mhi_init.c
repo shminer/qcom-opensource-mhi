@@ -473,6 +473,7 @@ MHI_STATUS mhi_init_device_ctrl(mhi_device_ctxt *mhi_device)
 	u32 align_len = sizeof(u64)*2;
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
 
+	mhi_device->enable_lpm = 1;
 	if (NULL == mhi_device || NULL == mhi_device->mhi_ctrl_seg_info ||
 			NULL == mhi_device->mhi_ctrl_seg_info->dev)
 		return MHI_STATUS_ERROR;

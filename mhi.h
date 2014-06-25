@@ -470,6 +470,7 @@ struct mhi_device_ctxt {
 	STATE_TRANSITION base_state;
 	atomic_t outbound_acks;
 	struct wakeup_source wake_lock;
+	int enable_lpm;
 };
 
 MHI_STATUS mhi_reset_all_thread_queues(mhi_device_ctxt *mhi_dev_ctxt);
