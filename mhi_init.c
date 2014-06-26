@@ -109,12 +109,17 @@ MHI_STATUS mhi_init_device_ctxt(mhi_pcie_dev_info *dev_info,
 					MHI_INIT_ERROR_STAGE_DEVICE_CTRL);
 		return MHI_STATUS_ERROR;
 	}
-	if (MHI_STATUS_SUCCESS != mhi_init_wakelock(*mhi_device))
-	{
+	if (MHI_STATUS_SUCCESS != mhi_init_wakelock(*mhi_device)) {
 		mhi_log(MHI_MSG_ERROR, "Failed to initialize wakelock\n");
 		mhi_clean_init_stage(*mhi_device,
 					MHI_INIT_ERROR_STAGE_DEVICE_CTRL);
 		return MHI_STATUS_ERROR;
+	}
+		if (MHI_STATUS_SUCCESS != mhi_init_work_queues(*mhi_device)) {
+			mhi_log(MHI_MSG_ERROR, "Failed initializing work queues\n");
+			mhi_clean_init_stage(*mhi_device,
+					MHI_INIT_ERROR_STAGE_DEVICE_CTRL);
+			return MHI_STATUS_ERROR;
 	}
 	(*mhi_device)->dev_info = dev_info;
 	(*mhi_device)->dev_props = &dev_info->core;
@@ -144,18 +149,23 @@ MHI_STATUS mhi_create_ctxt(mhi_device_ctxt **mhi_device)
 	(*mhi_device)->nr_of_cmdc = NR_OF_CMD_RINGS;
 
 	(*mhi_device)->alloced_ev_rings[PRIMARY_EVENT_RING] = 0;
-	(*mhi_device)->alloced_ev_rings[SECONDARY_EVENT_RING] =
+	(*mhi_device)->alloced_ev_rings[SOFTWARE_EV_RING] =
+						SOFTWARE_EV_RING;
+	(*mhi_device)->alloced_ev_rings[IPA_OUT_EV_RING] =
 						MHI_CLIENT_IP_HW_0_OUT;
-	(*mhi_device)->alloced_ev_rings[TERTIARY_EVENT_RING] =
+	(*mhi_device)->alloced_ev_rings[IPA_IN_EV_RING] =
 						MHI_CLIENT_IP_HW_0_IN;
 	MHI_SET_EVENT_RING_INFO(EVENT_RING_POLLING,
 			(*mhi_device)->ev_ring_props[PRIMARY_EVENT_RING],
 			MHI_EVENT_POLLING_ENABLED);
 	MHI_SET_EVENT_RING_INFO(EVENT_RING_POLLING,
-			(*mhi_device)->ev_ring_props[SECONDARY_EVENT_RING],
+			(*mhi_device)->ev_ring_props[SOFTWARE_EV_RING],
 			MHI_EVENT_POLLING_ENABLED);
 	MHI_SET_EVENT_RING_INFO(EVENT_RING_POLLING,
-			(*mhi_device)->ev_ring_props[TERTIARY_EVENT_RING],
+			(*mhi_device)->ev_ring_props[IPA_OUT_EV_RING],
+			MHI_EVENT_POLLING_ENABLED);
+	MHI_SET_EVENT_RING_INFO(EVENT_RING_POLLING,
+			(*mhi_device)->ev_ring_props[IPA_IN_EV_RING],
 			MHI_EVENT_POLLING_DISABLED);
 
 	for (i = 0; i < MAX_NR_MSI; ++i)
@@ -205,6 +215,7 @@ MHI_STATUS mhi_init_sync(mhi_device_ctxt *mhi_dev_ctxt)
 		spin_lock_init(&mhi_dev_ctxt->db_write_lock[i]);
 	rwlock_init(&mhi_dev_ctxt->xfer_lock);
 	mutex_init(&mhi_dev_ctxt->mhi_link_state);
+	mutex_init(&mhi_dev_ctxt->pm_lock);
 	return MHI_STATUS_SUCCESS;
 
 db_write_lock_free:
@@ -331,13 +342,14 @@ error_event_handle_alloc:
 MHI_STATUS mhi_init_state_change_thread_work_queue(mhi_state_work_queue *q)
 {
 	u32 mutex_acquired = 0;
-	if (NULL == q->q_mutex) {
-		q->q_mutex = kmalloc(sizeof(struct mutex), GFP_KERNEL);
-		if (NULL == q->q_mutex)
+	unsigned long flags = 0;
+	if (NULL == q->q_lock) {
+		q->q_lock = kmalloc(sizeof(spinlock_t), GFP_KERNEL);
+		if (NULL == q->q_lock)
 			return MHI_STATUS_ALLOC_ERROR;
-		mutex_init(q->q_mutex);
+		spin_lock_init(q->q_lock);
 	} else {
-		mutex_lock(q->q_mutex);
+		spin_lock_irqsave(q->q_lock, flags);
 		mutex_acquired = 1;
 	}
 	q->queue_full_cntr = 0;
@@ -347,14 +359,8 @@ MHI_STATUS mhi_init_state_change_thread_work_queue(mhi_state_work_queue *q)
 	q->q_info.len = MHI_WORK_Q_MAX_SIZE * sizeof(STATE_TRANSITION);
 	q->q_info.el_size = sizeof(STATE_TRANSITION);
 	q->q_info.overwrite_en = 0;
-	if (NULL == q->q_mutex) {
-		q->q_mutex = kmalloc(sizeof(struct mutex), GFP_KERNEL);
-		if (NULL == q->q_mutex)
-			return MHI_STATUS_ALLOC_ERROR;
-		mutex_init(q->q_mutex);
-	}
 	if (mutex_acquired)
-		mutex_unlock(q->q_mutex);
+		spin_unlock_irqrestore(q->q_lock, flags);
 
 	return MHI_STATUS_SUCCESS;
 }
@@ -509,10 +515,10 @@ MHI_STATUS mhi_init_contexts(mhi_device_ctxt *mhi_device)
 					mhi_device->ev_ring_props[i],
 					msi_vec);
 		switch (i) {
-		case SECONDARY_EVENT_RING:
+		case IPA_OUT_EV_RING:
 			intmod_t = 10;
 			break;
-		case TERTIARY_EVENT_RING:
+		case IPA_IN_EV_RING:
 			intmod_t = 6;
 			break;
 		}
@@ -682,14 +688,26 @@ MHI_STATUS mhi_reset_all_thread_queues(mhi_device_ctxt *mhi_dev_ctxt)
 
 MHI_STATUS mhi_init_timers(mhi_device_ctxt *mhi_dev_ctxt)
 {
-	hrtimer_init(&mhi_dev_ctxt->inactivity_tmr,
+	hrtimer_init(&mhi_dev_ctxt->m1_timer,
 			CLOCK_MONOTONIC,
 			HRTIMER_MODE_REL);
-	mhi_dev_ctxt->inactivity_timeout =
+	mhi_dev_ctxt->m1_timeout =
 			ktime_set(0, MHI_M1_ENTRY_DELAY_MS * 1E6L);
-	mhi_dev_ctxt->inactivity_tmr.function = mhi_initiate_M1;
+	mhi_dev_ctxt->m1_timer.function = mhi_initiate_M1;
 	mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
-		"Starting Inactivity timer\n");
+		"Starting M1 timer\n");
+	return MHI_STATUS_SUCCESS;
+}
+MHI_STATUS mhi_init_work_queues(mhi_device_ctxt *mhi_dev_ctxt)
+{
+	mhi_dev_ctxt->work_queue = create_singlethread_workqueue("mhi");
+	if (NULL == mhi_dev_ctxt->work_queue) {
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+			"Failed to create MHI work queue.\n");
+		return MHI_STATUS_ERROR;
+	}
+	INIT_DELAYED_WORK(&mhi_dev_ctxt->m3_work, delayed_m3);
+	INIT_WORK(&mhi_dev_ctxt->m0_work, m0_work);
 	return MHI_STATUS_SUCCESS;
 }
 MHI_STATUS mhi_reg_notifiers(mhi_device_ctxt *mhi_dev_ctxt)

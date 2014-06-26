@@ -192,7 +192,7 @@ static int mhi_uci_client_release(struct inode *mhi_inode,
 		struct file *file_handle)
 {
 	uci_client *client_handle = file_handle->private_data;
-	u32 retry_cnt = 5;
+	u32 retry_cnt = 100;
 
 	if (NULL == client_handle)
 		return -EINVAL;
@@ -722,9 +722,8 @@ void uci_xfer_cb(mhi_cb_info *cb_info)
 				if (uci_handle->mhi_status != -ENETRESET) {
 					mhi_uci_log(UCI_DBG_CRITICAL,
 						"Setting reset for chan %d.\n",
-						i*2);
+						i * 2);
 				uci_handle->mhi_status = -ENETRESET;
-				atomic_set(&uci_handle->out_pkt_pend_ack,0);
 				atomic_inc(&uci_handle->avail_pkts);
 				wake_up(&uci_handle->read_wait_queue);
 				} else {
