@@ -37,36 +37,31 @@ static struct attribute_group mhi_attribute_group = {
 
 int mhi_suspend(struct pci_dev *pcie_dev, pm_message_t state)
 {
+	int r = 0;
 	mhi_device_ctxt *mhi_dev_ctxt =
 		*(mhi_device_ctxt **)((pcie_dev->dev).platform_data);
 	mhi_log(MHI_MSG_INFO, "Entered, sys state %d, MHI state %d\n",
 			state.event, mhi_dev_ctxt->mhi_state);
-	if (NULL == mhi_dev_ctxt)
-		return -EINVAL;
-	else
-		return mhi_initiate_m3(mhi_dev_ctxt);
+	if (NULL == mhi_dev_ctxt) {
+		r = -EINVAL;
+		goto exit;
+	} else {
+		r = mhi_initiate_m3(mhi_dev_ctxt);
+	}
+	if (!r)
+		atomic_set(&mhi_dev_ctxt->flags.pending_resume, 1);
+exit:
+	return r;
 }
 
 int mhi_resume(struct pci_dev *pcie_dev)
 {
 	int r = 0;
-	u32 max_retries = MHI_RESUME_WAKE_RETRIES;
 	mhi_device_ctxt *mhi_dev_ctxt =
 			*(mhi_device_ctxt **)((pcie_dev->dev).platform_data);
-	do {
-		if (atomic_read(&mhi_dev_ctxt->flags.pending_wake))
-			mhi_log(MHI_MSG_INFO,
-				"Waiting for WAKE to conclude\n");
-		else if (max_retries  == MHI_RESUME_WAKE_RETRIES)
-			/* There was never a pending wake, continue suspending */
-			break;
-		else
-			return 0;
-		msleep(20);
-	} while(--max_retries);
 	r = mhi_initiate_m0(mhi_dev_ctxt);
 	if (r)
-		return r;
+		goto exit;
 	r = wait_event_interruptible_timeout(*mhi_dev_ctxt->M0_event,
 			mhi_dev_ctxt->mhi_state == MHI_STATE_M0 ||
 			mhi_dev_ctxt->mhi_state == MHI_STATE_M1,
@@ -88,6 +83,8 @@ int mhi_resume(struct pci_dev *pcie_dev)
 			"Wait complete state: %d\n", mhi_dev_ctxt->mhi_state);
 		r = 0;
 	}
+exit:
+	atomic_set(&mhi_dev_ctxt->flags.pending_resume, 0);
 	return r;
 }
 
