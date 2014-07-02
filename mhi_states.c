@@ -251,7 +251,7 @@ MHI_STATUS process_WAKE_transition(mhi_device_ctxt *mhi_dev_ctxt,
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
 	mhi_log(MHI_MSG_INFO, "Entered\n");
 	__pm_stay_awake(&mhi_dev_ctxt->wake_lock);
-	__pm_relax(&mhi_dev_ctxt->wake_lock);
+
 	ret_val = mhi_turn_on_pcie_link(mhi_dev_ctxt);
 
 	if (MHI_STATUS_SUCCESS != ret_val) {
@@ -275,10 +275,9 @@ MHI_STATUS process_WAKE_transition(mhi_device_ctxt *mhi_dev_ctxt,
 				"Failed to transition to base state %d.\n",
 				ret_val);
 	}
-
 exit:
-	atomic_set(&mhi_dev_ctxt->flags.pending_wake, 0);
 	mhi_log(MHI_MSG_INFO, "Exited.\n");
+	__pm_relax(&mhi_dev_ctxt->wake_lock);
 	return ret_val;
 
 }
