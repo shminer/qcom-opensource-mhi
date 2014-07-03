@@ -735,6 +735,29 @@ MHI_STATUS parse_xfer_event(mhi_device_ctxt *ctxt, mhi_event_pkt *event)
 		} while (i <= nr_trb_to_parse);
 		break;
 	} /* CC_EOT */
+	case MHI_EVENT_CC_OOB:
+	case MHI_EVENT_CC_DB_MODE:
+	{
+		mhi_ring *chan_ctxt = NULL;
+		u64 db_value = 0;
+		mhi_dev_ctxt->uldl_enabled = 1;
+		chan = MHI_EV_READ_CHID(EV_CHID, event);
+		mhi_dev_ctxt->db_mode[chan] = 1;
+		chan_ctxt =
+			&mhi_dev_ctxt->mhi_local_chan_ctxt[chan];
+		mhi_log(MHI_MSG_INFO, "OOB Detected chan %d.\n", chan);
+		if (chan_ctxt->wp != chan_ctxt->rp) {
+			db_value = mhi_v2p_addr(mhi_dev_ctxt->mhi_ctrl_seg_info,
+							(uintptr_t)chan_ctxt->wp);
+			MHI_WRITE_DB(mhi_dev_ctxt, mhi_dev_ctxt->channel_db_addr, chan,
+				db_value);
+		}
+		client_handle = mhi_dev_ctxt->client_handle_list[chan];
+			if (NULL != client_handle) {
+				result->transaction_status = MHI_STATUS_DEVICE_NOT_READY;
+			}
+		break;
+	}
 	default:
 		{
 			mhi_log(MHI_MSG_ERROR,
