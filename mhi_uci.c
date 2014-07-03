@@ -192,7 +192,7 @@ static int mhi_uci_client_release(struct inode *mhi_inode,
 		struct file *file_handle)
 {
 	uci_client *client_handle = file_handle->private_data;
-	u32 retry_cnt = 5;
+	u32 retry_cnt = 100;
 
 	if (NULL == client_handle)
 		return -EINVAL;
@@ -242,14 +242,15 @@ static ssize_t mhi_uci_client_read(struct file *file, char __user *buf,
 	    0 == uspace_buf_size || NULL == file->private_data)
 		return -EINVAL;
 
+	mhi_uci_log(UCI_DBG_VERBOSE,
+		"Client attempted read on chan %d\n", chan);
 	uci_handle = file->private_data;
 	client_handle = uci_handle->inbound_handle;
 	mutex = &mhi_uci_ctxt.client_chan_lock[uci_handle->in_chan];
 	chan = uci_handle->in_chan;
 	mutex_lock(mutex);
 	buf_size = mhi_uci_ctxt.channel_attributes[chan].max_packet_size;
-	mhi_uci_log(UCI_DBG_VERBOSE,
-		    "Client attempted read on chan %d buf_size 0x%x\n", chan, buf_size);
+
 	do {
 		mhi_poll_inbound(client_handle,
 				&phy_buf,
@@ -721,9 +722,8 @@ void uci_xfer_cb(mhi_cb_info *cb_info)
 				if (uci_handle->mhi_status != -ENETRESET) {
 					mhi_uci_log(UCI_DBG_CRITICAL,
 						"Setting reset for chan %d.\n",
-						i*2);
+						i * 2);
 				uci_handle->mhi_status = -ENETRESET;
-				atomic_set(&uci_handle->out_pkt_pend_ack,0);
 				atomic_inc(&uci_handle->avail_pkts);
 				wake_up(&uci_handle->read_wait_queue);
 				} else {
