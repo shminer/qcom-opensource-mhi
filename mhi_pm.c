@@ -40,17 +40,25 @@ int mhi_suspend(struct pci_dev *pcie_dev, pm_message_t state)
 	int r = 0;
 	mhi_device_ctxt *mhi_dev_ctxt =
 		*(mhi_device_ctxt **)((pcie_dev->dev).platform_data);
+	if (NULL == mhi_dev_ctxt)
+		return -EINVAL;
 	mhi_log(MHI_MSG_INFO, "Entered, sys state %d, MHI state %d\n",
 			state.event, mhi_dev_ctxt->mhi_state);
-	if (NULL == mhi_dev_ctxt) {
-		r = -EINVAL;
-		goto exit;
-	} else {
-		r = mhi_initiate_m3(mhi_dev_ctxt);
+	atomic_set(&mhi_dev_ctxt->flags.pending_resume, 1);
+	r = cancel_work_sync(&mhi_dev_ctxt->m0_work);
+	if (r) {
+		atomic_set(&mhi_dev_ctxt->flags.m0_work_enabled, 0);
+		mhi_log(MHI_MSG_INFO, "M0 work cancelled\n");
 	}
+
+	r = mhi_initiate_m3(mhi_dev_ctxt);
+
 	if (!r)
-		atomic_set(&mhi_dev_ctxt->flags.pending_resume, 1);
-exit:
+		return r;
+
+	atomic_set(&mhi_dev_ctxt->flags.pending_resume, 0);
+	mhi_log(MHI_MSG_ERROR, "Failing suspend sequence ret: %d\n",
+						r);
 	return r;
 }
 
