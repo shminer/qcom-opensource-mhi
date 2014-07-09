@@ -749,7 +749,12 @@ void m0_work(struct work_struct *work)
 {
 	mhi_device_ctxt *mhi_dev_ctxt =
 		container_of(work, mhi_device_ctxt, m0_work);
-	mhi_initiate_m0(mhi_dev_ctxt);
+	if (!atomic_read(&mhi_dev_ctxt->flags.pending_resume)) {
+		mhi_log(MHI_MSG_INFO, "No pending resume, initiating M0.\n");
+		mhi_initiate_m0(mhi_dev_ctxt);
+	} else {
+		mhi_log(MHI_MSG_INFO, "Pending resume, quitting.\n");
+	}
 }
 
 int mhi_initiate_m0(mhi_device_ctxt *mhi_dev_ctxt)
