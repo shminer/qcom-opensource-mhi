@@ -254,7 +254,7 @@ MHI_STATUS mhi_turn_on_pcie_link(mhi_device_ctxt *mhi_dev_ctxt)
 			NULL, 0);
 	if (r) {
 		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
-				"Failed to resume pcie bus ret 0x%x\n", r);
+				"Failed to resume pcie bus ret %d\n", r);
 		ret_val = MHI_STATUS_ERROR;
 		goto exit;
 	}
@@ -265,11 +265,18 @@ MHI_STATUS mhi_turn_on_pcie_link(mhi_device_ctxt *mhi_dev_ctxt)
 				PCI_D0);
 	if (r) {
 		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
-				"Failed to load stored state %d\n", r);
+				"Failed to load stored state ret %d\n", r);
 		ret_val = MHI_STATUS_ERROR;
 		goto exit;
 	}
-	msm_pcie_recover_config(mhi_dev_ctxt->dev_info->pcie_device);
+	r = msm_pcie_recover_config(mhi_dev_ctxt->dev_info->pcie_device);
+	if (r) {
+		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
+				"Failed to Recover config space ret: %d\n", r);
+		ret_val = MHI_STATUS_ERROR;
+		goto exit;
+	}
+
 	mhi_dev_ctxt->flags.link_up = 1;
 exit:
 	mutex_unlock(&mhi_dev_ctxt->mhi_link_state);
