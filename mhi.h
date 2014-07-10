@@ -663,4 +663,7 @@ MHI_STATUS mhi_wake_dev_from_m3(mhi_device_ctxt *mhi_dev_ctxt);
 MHI_STATUS mhi_process_link_down(mhi_device_ctxt *mhi_dev_ctxt);
 int mhi_initiate_m0(mhi_device_ctxt *mhi_dev_ctxt);
 int mhi_initiate_m3(mhi_device_ctxt *mhi_dev_ctxt);
+int mhi_set_bus_request(struct mhi_device_ctxt *mhi_dev_ctxt,
+					int index);
+
 #endif

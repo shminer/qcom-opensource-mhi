@@ -322,8 +322,7 @@ MHI_STATUS process_M0_transition(mhi_device_ctxt *mhi_dev_ctxt,
 		ring_all_cmd_dbs(mhi_dev_ctxt);
 	}
 	atomic_dec(&mhi_dev_ctxt->flags.data_pending);
-	ret_val  =
-	msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client, 1);
+	ret_val  = mhi_set_bus_request(mhi_dev_ctxt, 1);
 	if (ret_val)
 		mhi_log(MHI_MSG_CRITICAL,
 			"Could not set bus frequency ret: %d\n",
@@ -459,9 +458,7 @@ MHI_STATUS process_M1_transition(mhi_device_ctxt  *mhi_dev_ctxt,
 		mhi_dev_ctxt->counters.m1_m2++;
 	}
 	write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
-	ret_val  =
-		msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client,
-							0);
+	ret_val  = mhi_set_bus_request(mhi_dev_ctxt, 0);
 	if (ret_val)
 		mhi_log(MHI_MSG_INFO, "Failed to update bus request\n");
 	if (!atomic_cmpxchg(&mhi_dev_ctxt->flags.m3_work_enabled, 0, 1)) {
@@ -894,8 +891,7 @@ MHI_STATUS mhi_process_link_down(mhi_device_ctxt *mhi_dev_ctxt)
 		mhi_log(MHI_MSG_CRITICAL | MHI_DBG_POWER,
 			"Timer executing and can't stop\n");
 	}
-	r =
-	msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client, 0);
+	r = mhi_set_bus_request(mhi_dev_ctxt, 0);
 	if (r)
 		mhi_log(MHI_MSG_INFO,
 			"Failed to scale bus request to sleep set.\n");
@@ -941,6 +937,15 @@ int mhi_initiate_m3(mhi_device_ctxt *mhi_dev_ctxt)
 		else
 			r = 0;
 		goto exit;
+	case MHI_STATE_RESET:
+		mhi_log(MHI_MSG_INFO,
+				"MHI in RESET turning link off and quitting\n");
+		mhi_turn_off_pcie_link(mhi_dev_ctxt);
+		r = mhi_set_bus_request(mhi_dev_ctxt, 0);
+		if (r)
+			mhi_log(MHI_MSG_INFO, "Failed to set bus freq ret %d\n", r);
+		goto exit;
+
 	default:
 		mhi_log(MHI_MSG_INFO,
 			"MHI state %d, link state %d.\n",
@@ -959,6 +964,11 @@ int mhi_initiate_m3(mhi_device_ctxt *mhi_dev_ctxt)
 
 	if (atomic_read(&mhi_dev_ctxt->flags.data_pending))
 		goto exit;
+	r = hrtimer_cancel(&mhi_dev_ctxt->m1_timer);
+	if (r)
+		mhi_log(MHI_MSG_INFO, "Cancelled M1 timer, timer was active\n");
+	else
+		mhi_log(MHI_MSG_INFO, "Cancelled M1 timer, timer was not active\n");
 	write_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
 	if (mhi_dev_ctxt->flags.pending_M0) {
 		write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
@@ -968,11 +978,8 @@ int mhi_initiate_m3(mhi_device_ctxt *mhi_dev_ctxt)
 		goto exit;
 	}
 	mhi_dev_ctxt->flags.pending_M3 = 1;
-	r = hrtimer_cancel(&mhi_dev_ctxt->m1_timer);
-	if (r)
-		mhi_log(MHI_MSG_INFO, "Cancelled M1 timer, timer was active\n");
-	else
-		mhi_log(MHI_MSG_INFO, "Cancelled M1 timer, timer was not active\n");
+
+
 	mhi_set_m_state(mhi_dev_ctxt, MHI_STATE_M3);
 	write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 
@@ -1004,8 +1011,7 @@ int mhi_initiate_m3(mhi_device_ctxt *mhi_dev_ctxt)
 	mhi_deassert_device_wake(mhi_dev_ctxt);
 	/* Turn off PCIe link*/
 	mhi_turn_off_pcie_link(mhi_dev_ctxt);
-	r =
-		msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client, 0);
+	r = mhi_set_bus_request(mhi_dev_ctxt, 0);
 	if (r)
 		mhi_log(MHI_MSG_INFO, "Failed to set bus freq ret %d\n", r);
 exit:

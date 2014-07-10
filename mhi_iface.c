@@ -185,8 +185,7 @@ int mhi_startup_thread(void *ctxt)
 			"Could not register for bus control ret: %d.\n",
 			mhi_pcie_dev->mhi_ctxt->bus_client);
 	} else {
-		ret_val =
-			msm_bus_scale_client_update_request(mhi_pcie_dev->mhi_ctxt->bus_client, 1);
+		ret_val = mhi_set_bus_request(mhi_pcie_dev->mhi_ctxt, 1);
 		if (ret_val)
 			mhi_log(MHI_MSG_CRITICAL,
 				"Could not set bus frequency ret: %d\n",
