@@ -1278,3 +1278,10 @@ int mhi_set_lpm(mhi_client_handle *client_handle, int enable_lpm)
 	client_handle->mhi_dev_ctxt->enable_lpm = enable_lpm ? 1 : 0;
 	return 0;
 }
+int mhi_set_bus_request(struct mhi_device_ctxt *mhi_dev_ctxt,
+					int index)
+{
+	mhi_log(MHI_MSG_INFO, "Setting bus request to index %d\n", index);
+	return msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client,
+							index);
+}
