@@ -436,6 +436,7 @@ error:
 	atomic_dec(&mhi_dev_ctxt->flags.data_pending);
 	return ret_val;
 }
+
 MHI_STATUS mhi_notify_device(mhi_device_ctxt *mhi_dev_ctxt, u32 chan)
 {
 	unsigned long flags = 0;
@@ -465,7 +466,7 @@ MHI_STATUS mhi_notify_device(mhi_device_ctxt *mhi_dev_ctxt, u32 chan)
 		}
 	} else {
 		mhi_log(MHI_MSG_VERBOSE,
-			"Triggering wakeup, due to pending data MHI state %d, Chan state %d\n",
+			"Triggering wakeup due to pending data MHI state %d, Chan state %d\n",
 			mhi_dev_ctxt->mhi_state, chan_ctxt->mhi_chan_state);
 		if (mhi_dev_ctxt->flags.pending_M3 ||
 		    mhi_dev_ctxt->mhi_state == MHI_STATE_M3) {
@@ -484,6 +485,14 @@ MHI_STATUS mhi_wake_dev_from_m3(mhi_device_ctxt *mhi_dev_ctxt)
 	if (!atomic_cmpxchg(&mhi_dev_ctxt->flags.m0_work_enabled, 0, 1)) {
 		mhi_log(MHI_MSG_INFO,
 			"Initiating M0 work...\n");
+		if (atomic_read(&mhi_dev_ctxt->flags.pending_resume)) {
+			mhi_log(MHI_MSG_INFO,
+			"Resume is pending, quitting ...\n");
+			atomic_set(&mhi_dev_ctxt->flags.m0_work_enabled, 0);
+			__pm_stay_awake(&mhi_dev_ctxt->wake_lock);
+			__pm_relax(&mhi_dev_ctxt->wake_lock);
+			return MHI_STATUS_SUCCESS;
+		}
 		r = queue_work(mhi_dev_ctxt->work_queue,
 		     &mhi_dev_ctxt->m0_work);
 		if (!r)
