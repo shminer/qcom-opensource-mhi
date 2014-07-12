@@ -180,8 +180,7 @@ MHI_STATUS init_mhi_base_state(mhi_device_ctxt* mhi_dev_ctxt)
 
 	mhi_assert_device_wake(mhi_dev_ctxt);
 	mhi_dev_ctxt->flags.link_up = 1;
-	r =
-	msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client, 1);
+	r = mhi_set_bus_request(mhi_dev_ctxt, 1);
 	if (r)
 	mhi_log(MHI_MSG_INFO,
 		"Failed to scale bus request to active set.\n");
