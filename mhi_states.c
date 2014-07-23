@@ -913,13 +913,19 @@ int mhi_initiate_m3(mhi_device_ctxt *mhi_dev_ctxt)
 			mhi_dev_ctxt->mhi_state, mhi_dev_ctxt->flags.pending_M0,
 						mhi_dev_ctxt->flags.pending_M3);
 	mutex_lock(&mhi_dev_ctxt->pm_lock);
+
 	switch (mhi_dev_ctxt->mhi_state) {
+	case MHI_STATE_M1:
 	case MHI_STATE_M2:
 		mhi_log(MHI_MSG_INFO,
 			"Triggering wake out of M2\n");
+		write_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
+		mhi_dev_ctxt->flags.pending_M3 = 1;
 		mhi_assert_device_wake(mhi_dev_ctxt);
+		write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 		r = wait_event_interruptible_timeout(*mhi_dev_ctxt->M0_event,
-				mhi_dev_ctxt->mhi_state == MHI_STATE_M0,
+				mhi_dev_ctxt->mhi_state == MHI_STATE_M0 ||
+				mhi_dev_ctxt->mhi_state == MHI_STATE_M1,
 				msecs_to_jiffies(MHI_MAX_RESUME_TIMEOUT));
 		if (0 == r || -ERESTARTSYS == r) {
 			mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
@@ -961,7 +967,6 @@ int mhi_initiate_m3(mhi_device_ctxt *mhi_dev_ctxt)
 			__pm_relax(&mhi_dev_ctxt->wake_lock);
 		goto exit;
 	}
-
 	if (atomic_read(&mhi_dev_ctxt->flags.data_pending))
 		goto exit;
 	r = hrtimer_cancel(&mhi_dev_ctxt->m1_timer);
@@ -978,12 +983,9 @@ int mhi_initiate_m3(mhi_device_ctxt *mhi_dev_ctxt)
 		goto exit;
 	}
 	mhi_dev_ctxt->flags.pending_M3 = 1;
-
-
 	mhi_set_m_state(mhi_dev_ctxt, MHI_STATE_M3);
 	write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 
-	/*7. Set M3 on the device wait for M3 event */
 	mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
 			"Waiting for M3 completion.\n");
 	r = wait_event_interruptible_timeout(*mhi_dev_ctxt->M3_event,
