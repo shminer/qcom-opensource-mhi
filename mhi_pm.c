@@ -52,7 +52,6 @@ int mhi_suspend(struct pci_dev *pcie_dev, pm_message_t state)
 	}
 
 	r = mhi_initiate_m3(mhi_dev_ctxt);
-
 	if (!r)
 		return r;
 
