@@ -109,6 +109,7 @@ struct rmnet_mhi_private {
 	gfp_t                         allocation_flags;
 	uint32_t                      tx_buffers_max;
 	uint32_t                      rx_buffers_max;
+	int32_t                       irq_masked;
 };
 
 struct tx_buffer_priv {
@@ -306,7 +307,10 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 
 	/* We got a NULL descriptor back */
 	if (false == should_reschedule) {
-		mhi_unmask_irq(rmnet_mhi_ptr->rx_client_handle);
+		if (rmnet_mhi_ptr->irq_masked) {
+			mhi_unmask_irq(rmnet_mhi_ptr->rx_client_handle);
+			--rmnet_mhi_ptr->irq_masked;
+		}
 	} else {
 		if (received_packets == budget)
 			rx_napi_budget_overflow[rmnet_mhi_ptr->dev_index]++;
@@ -446,6 +450,7 @@ void rmnet_mhi_rx_cb(mhi_cb_info *cb_info)
 
 	/* Disable interrupts */
 	mhi_mask_irq(rmnet_mhi_ptr->rx_client_handle);
+	rmnet_mhi_ptr->irq_masked++;
 
 	/* We need to start a watchdog here, not sure how to do that yet */
 
@@ -657,6 +662,10 @@ static int rmnet_mhi_close(struct net_device *dev)
 	struct rmnet_mhi_private *rmnet_mhi_ptr = netdev_priv(dev);
 
 	napi_disable(&(rmnet_mhi_ptr->napi));
+	if (rmnet_mhi_ptr->irq_masked) {
+		mhi_unmask_irq(rmnet_mhi_ptr->rx_client_handle);
+		--rmnet_mhi_ptr->irq_masked;
+	}
 
 	return 0;
 }
