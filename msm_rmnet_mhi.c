@@ -185,8 +185,9 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 		mhi_result *result =
 		      mhi_poll(rmnet_mhi_ptr->rx_client_handle);
 
-		/* Failure from MHI core */
-		if (unlikely (MHI_STATUS_SUCCESS != result->transaction_status)) {
+		if(result->transaction_status == MHI_STATUS_DEVICE_NOT_READY) {
+			continue;
+		} else if (result->transaction_status != MHI_STATUS_SUCCESS) {
 			/* TODO: Handle error */
 			pr_err("%s: mhi_poll failed, error is %d",
 			       __func__, result->transaction_status);
@@ -408,7 +409,7 @@ void rmnet_mhi_tx_cb(mhi_cb_info *cb_info)
 		    tx_cb_skb_free_burst_max[rmnet_mhi_ptr->dev_index]);
 
 	/* In case we couldn't write again, now we can! */
-	netif_start_queue(dev);
+	netif_wake_queue(dev);
 		break;
 		default:
 			pr_err("%s: Got SSR notification %d from MHI CORE.",
@@ -798,6 +799,9 @@ static int rmnet_mhi_ioctl_extended(struct net_device *dev, struct ifreq *ifr)
 	case RMNET_IOCTL_GET_DRIVER_NAME:
 		strlcpy(ext_cmd.u.if_name, RMNET_MHI_DRIVER_NAME,
 			sizeof(ext_cmd.u.if_name));
+		break;
+	case RMNET_IOCTL_SET_SLEEP_STATE:
+		mhi_set_lpm(rmnet_mhi_ptr->tx_client_handle, ext_cmd.u.data);
 		break;
 	default:
 		rc = -EINVAL;

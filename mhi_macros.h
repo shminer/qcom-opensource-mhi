@@ -19,19 +19,20 @@
 #define MHI_VERSION 0x01000000
 #define ALIGNMENT_OFFSET 0xFFF
 #define NR_OF_CMD_RINGS 1
-#define EV_EL_PER_RING 256
+#define EV_EL_PER_RING (256 + 16)
 #define CMD_EL_PER_RING 128
 #define ELEMENT_GAP 1
 #define MHI_EPID 4
 #define MHI_MAX_RESUME_TIMEOUT 5000
 #define MHI_MAX_SUSPEND_TIMEOUT 5000
 
-#define MAX_NR_MSI 3
+#define MAX_NR_MSI 4
 
-#define EVENT_RINGS_ALLOCATED 3
+#define EVENT_RINGS_ALLOCATED 4
 #define PRIMARY_EVENT_RING 0
-#define SECONDARY_EVENT_RING 1
-#define TERTIARY_EVENT_RING 2
+#define SOFTWARE_EV_RING 1
+#define IPA_OUT_EV_RING 2
+#define IPA_IN_EV_RING 3
 
 #define PRIMARY_CMD_RING 0
 #define MHI_WORK_Q_MAX_SIZE 128
@@ -40,10 +41,10 @@
 #define MHI_MAX_SUPPORTED_DEVICES 1
 
 #define MAX_NR_TRBS_PER_SOFT_CHAN 10
-#define MAX_NR_TRBS_PER_HARD_CHAN 128
+#define MAX_NR_TRBS_PER_HARD_CHAN (128 + 16)
 #define MHI_PCIE_VENDOR_ID 0x17CB
 #define MHI_PCIE_DEVICE_ID 0x0300
-#define TRB_MAX_DATA_SIZE 0xFFFF
+#define TRB_MAX_DATA_SIZE 0x1000
 
 
 #define MHI_DATA_SEG_WINDOW_START_ADDR 0x0ULL
@@ -83,6 +84,7 @@
 /* Timeout Values */
 #define MHI_READY_STATUS_TIMEOUT_MS 500
 #define MHI_THREAD_SLEEP_TIMEOUT_MS 20
+#define MHI_RESUME_WAKE_RETRIES 20
 
 /* Debugging Capabilities*/
 #define MHI_DBG_MAX_EVENT_HISTORY 10
@@ -240,24 +242,51 @@
 		_val >>= (u32)(_shift); \
 	} while (0)
 
-#define MHI_WRITE_DB(_mhi_dev_ctxt, _addr, _index, _val) \
-{ \
-	u32 word; \
-	u32 offset = _index * sizeof(u64); \
-	mhi_log(MHI_MSG_VERBOSE, \
-			"db.set addr: 0x%llX offset 0x%x val:0x%llX\n",\
-			(u64)_addr, (unsigned int)_index, (u64)_val); \
-	if (mhi_dev_ctxt->channel_db_addr == (_addr)) {                    \
+#define MHI_WRITE_DB(_mhi_dev_ctxt, _addr, _index, _val)			\
+{										\
+	u32 word;								\
+	u32 offset = _index * sizeof(u64);					\
+	mhi_log(MHI_MSG_VERBOSE,						\
+			"db.set addr: 0x%llX offset 0x%x val:0x%llX\n",		\
+			(u64)_addr, (unsigned int)_index, (u64)_val);		\
+	if (mhi_dev_ctxt->channel_db_addr == (_addr)) {				\
 		(_mhi_dev_ctxt)->mhi_ctrl_seg->mhi_cc_list[_index].mhi_trb_write_ptr = (_val);  \
 	} else if (mhi_dev_ctxt->event_db_addr == (_addr)) {				     \
 		(_mhi_dev_ctxt)->mhi_ctrl_seg->mhi_ec_list[_index].mhi_event_write_ptr = (_val);\
-	}				     \
-	wmb();				     \
-	word = HIGH_WORD((u64)(_val));       \
-	pcie_write(_addr, offset + 4, word); \
-	word = LOW_WORD((u64)(_val));	     \
-	pcie_write(_addr, offset, word);     \
-	wmb(); \
+	}									\
+	if (_addr == mhi_dev_ctxt->channel_db_addr) {				\
+		if (IS_HARDWARE_CHANNEL(_index) && mhi_dev_ctxt->uldl_enabled && \
+					!mhi_dev_ctxt->db_mode[_index])  {	\
+		}  else {							\
+			wmb();							\
+			word = HIGH_WORD((u64)(_val));				\
+			pcie_write(_addr, offset + 4, word);			\
+			word = LOW_WORD((u64)(_val));	     \
+			pcie_write(_addr, offset, word);     \
+			wmb();				     \
+			mhi_dev_ctxt->db_mode[_index] = 0;   \
+		}					     \
+	} else if (_addr == mhi_dev_ctxt->event_db_addr) {   \
+		if (IS_SOFTWARE_CHANNEL(_index) || !mhi_dev_ctxt->uldl_enabled) {\
+			wmb();				     \
+			word = HIGH_WORD((u64)(_val));       \
+			pcie_write(_addr, offset + 4, word); \
+			wmb();				     \
+			word = LOW_WORD((u64)(_val));	     \
+			pcie_write(_addr, offset, word);     \
+			wmb();				     \
+			mhi_dev_ctxt->db_mode[_index] = 0;   \
+		}					     \
+	} else {					     \
+		wmb();				     \
+		word = HIGH_WORD((u64)(_val));       \
+		pcie_write(_addr, offset + 4, word); \
+		wmb();				     \
+		word = LOW_WORD((u64)(_val));	     \
+		pcie_write(_addr, offset, word);     \
+		wmb();				     \
+		mhi_dev_ctxt->db_mode[_index] = 0;   \
+	}					     \
 }
 
 #define EVENT_RING_MSI_VEC

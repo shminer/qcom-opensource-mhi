@@ -16,8 +16,14 @@
 #define TRB_MAX_DATA_SIZE 0x1000
 
 UCI_DBG_LEVEL mhi_uci_msg_lvl = UCI_DBG_CRITICAL;
+UCI_DBG_LEVEL mhi_uci_ipc_log_lvl = UCI_DBG_VERBOSE;
+void *mhi_uci_ipc_log;
+#define MHI_UCI_IPC_LOG_PAGES (10)
+
 module_param(mhi_uci_msg_lvl , uint, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(mhi_uci_msg_lvl, "uci dbg lvl");
+module_param(mhi_uci_ipc_log_lvl , uint, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(mhi_uci_ipc_log_lvl, "uci dbg lvl");
 
 static ssize_t mhi_uci_client_read(struct file *file, char __user *buf,
 		size_t count, loff_t *offp);
@@ -186,7 +192,7 @@ static int mhi_uci_client_release(struct inode *mhi_inode,
 		struct file *file_handle)
 {
 	uci_client *client_handle = file_handle->private_data;
-	u32 retry_cnt = 5;
+	u32 retry_cnt = 100;
 
 	if (NULL == client_handle)
 		return -EINVAL;
@@ -401,7 +407,11 @@ static ssize_t mhi_uci_client_write(struct file *file,
 
 int mhi_uci_init(void)
 {
-    return platform_driver_register(&mhi_uci_driver);
+	mhi_uci_ipc_log = ipc_log_context_create(MHI_UCI_IPC_LOG_PAGES, "mhi-uci");
+	if (mhi_uci_ipc_log == NULL) {
+		mhi_uci_log(UCI_DBG_WARNING, "Failed to create IPC logging context\n");
+	}
+	return platform_driver_register(&mhi_uci_driver);
 }
 int mhi_uci_remove(struct platform_device* dev)
 {
@@ -706,14 +716,14 @@ void uci_xfer_cb(mhi_cb_info *cb_info)
 	case MHI_CB_MHI_DISABLED :
 		if (!atomic_cmpxchg(&mhi_uci_ctxt.mhi_disabled, 0, 1)) {
 			for (i = 0; i < MHI_MAX_NR_OF_CLIENTS; ++i) {
+				wmb();
 				uci_handle =
 					&mhi_uci_ctxt.client_handle_list[i];
 				if (uci_handle->mhi_status != -ENETRESET) {
 					mhi_uci_log(UCI_DBG_CRITICAL,
 						"Setting reset for chan %d.\n",
-						i*2);
+						i * 2);
 				uci_handle->mhi_status = -ENETRESET;
-				atomic_set(&uci_handle->out_pkt_pend_ack,0);
 				atomic_inc(&uci_handle->avail_pkts);
 				wake_up(&uci_handle->read_wait_queue);
 				} else {

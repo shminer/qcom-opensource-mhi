@@ -80,8 +80,7 @@ int mhi_probe(struct pci_dev *pcie_device,
 	mhi_pcie_dev->mhi_pcie_driver = &mhi_pcie_driver;
 	mhi_pcie_dev->mhi_pci_link_event.events =
 			(MSM_PCIE_EVENT_LINKDOWN | MSM_PCIE_EVENT_LINKUP |
-			 MSM_PCIE_EVENT_WAKE_RECOVERY |
-			 MSM_PCIE_EVENT_NO_ACCESS);
+			 MSM_PCIE_EVENT_WAKEUP);
 	mhi_pcie_dev->mhi_pci_link_event.user = pcie_device;
 	mhi_pcie_dev->mhi_pci_link_event.callback = mhi_link_state_cb;
 	mhi_pcie_dev->mhi_pci_link_event.notify.data = mhi_pcie_dev;
@@ -186,8 +185,7 @@ int mhi_startup_thread(void *ctxt)
 			"Could not register for bus control ret: %d.\n",
 			mhi_pcie_dev->mhi_ctxt->bus_client);
 	} else {
-		ret_val =
-			msm_bus_scale_client_update_request(mhi_pcie_dev->mhi_ctxt->bus_client, 1);
+		ret_val = mhi_set_bus_request(mhi_pcie_dev->mhi_ctxt, 1);
 		if (ret_val)
 			mhi_log(MHI_MSG_CRITICAL,
 				"Could not set bus frequency ret: %d\n",

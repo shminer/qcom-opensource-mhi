@@ -32,13 +32,14 @@ irqreturn_t irq_cb(int irq_number, void *dev_id)
 	switch (IRQ_TO_MSI(mhi_dev_ctxt, irq_number)) {
 	case 0:
 	case 1:
-		atomic_inc(&mhi_dev_ctxt->events_pending);
+	case 2:
+		atomic_inc(&mhi_dev_ctxt->flags.events_pending);
 		wake_up_interruptible(mhi_dev_ctxt->event_handle);
 		break;
-	case 2:
+	case 3:
 	{
 		client_index =
-			mhi_dev_ctxt->alloced_ev_rings[TERTIARY_EVENT_RING];
+			mhi_dev_ctxt->alloced_ev_rings[IPA_IN_EV_RING];
 		client_handle = mhi_dev_ctxt->client_handle_list[client_index];
 		client_info = &client_handle->client_info;
 
@@ -71,19 +72,29 @@ int parse_event_thread(void *ctxt)
 	for (;;) {
 		ret_val =
 			wait_event_interruptible(*mhi_dev_ctxt->event_handle,
-			(atomic_read(&mhi_dev_ctxt->events_pending) > 0) ||
-			mhi_dev_ctxt->kill_threads);
+			((atomic_read(&mhi_dev_ctxt->flags.events_pending) > 0) &&
+							!mhi_dev_ctxt->flags.stop_threads) ||
+			mhi_dev_ctxt->flags.kill_threads ||
+			(mhi_dev_ctxt->flags.stop_threads && !mhi_dev_ctxt->ev_thread_stopped));
 
-		if (0 == ret_val) {
-			if (mhi_dev_ctxt->kill_threads) {
+		switch(ret_val) {
+		case -ERESTARTSYS:
+			return 0;
+			break;
+		default:
+			if (mhi_dev_ctxt->flags.kill_threads) {
 				mhi_log(MHI_MSG_INFO,
 					"Caught exit signal, quitting\n");
-				mhi_dev_ctxt->event_thread_state =
-					MHI_THREAD_STATE_EXIT;
 				return 0;
 			}
+			if (mhi_dev_ctxt->flags.stop_threads) {
+				mhi_dev_ctxt->ev_thread_stopped = 1;
+				continue;
+			}
+			break;
 		}
-		atomic_dec(&mhi_dev_ctxt->events_pending);
+		mhi_dev_ctxt->ev_thread_stopped = 0;
+		atomic_dec(&mhi_dev_ctxt->flags.events_pending);
 
 		for (i = 0; i < EVENT_RINGS_ALLOCATED; ++i) {
 			MHI_GET_EVENT_RING_INFO(EVENT_RING_POLLING,
@@ -138,11 +149,15 @@ MHI_STATUS mhi_process_event_ring(mhi_device_ctxt *mhi_dev_ctxt,
 			mhi_log(MHI_MSG_INFO,
 					"MHI CCE received ring 0x%x\n",
 					ev_index);
+			__pm_stay_awake(&mhi_dev_ctxt->wake_lock);
+			__pm_relax(&mhi_dev_ctxt->wake_lock);
 			parse_cmd_event(mhi_dev_ctxt,
 					&event_to_process);
 			break;
 		case MHI_PKT_TYPE_TX_EVENT:
+			__pm_stay_awake(&mhi_dev_ctxt->wake_lock);
 			parse_xfer_event(mhi_dev_ctxt, &event_to_process);
+			__pm_relax(&mhi_dev_ctxt->wake_lock);
 			break;
 		case MHI_PKT_TYPE_STATE_CHANGE_EVENT:
 		{
@@ -151,6 +166,10 @@ MHI_STATUS mhi_process_event_ring(mhi_device_ctxt *mhi_dev_ctxt,
 			mhi_log(MHI_MSG_INFO,
 					"MHI STE received ring 0x%x\n",
 					ev_index);
+			if (new_state != STATE_TRANSITION_M3) {
+				__pm_stay_awake(&mhi_dev_ctxt->wake_lock);
+				__pm_relax(&mhi_dev_ctxt->wake_lock);
+			}
 			mhi_init_state_transition(mhi_dev_ctxt, new_state);
 			break;
 		}
@@ -160,6 +179,8 @@ MHI_STATUS mhi_process_event_ring(mhi_device_ctxt *mhi_dev_ctxt,
 			mhi_log(MHI_MSG_INFO,
 					"MHI EEE received ring 0x%x\n",
 					ev_index);
+			__pm_stay_awake(&mhi_dev_ctxt->wake_lock);
+			__pm_relax(&mhi_dev_ctxt->wake_lock);
 			switch(MHI_READ_EXEC_ENV(&event_to_process)) {
 			case MHI_EXEC_ENV_SBL:
 				new_state = STATE_TRANSITION_SBL;
@@ -211,9 +232,17 @@ void mhi_mask_irq(mhi_client_handle *client_handle)
 {
 	disable_irq_nosync(MSI_TO_IRQ(client_handle->mhi_dev_ctxt,
 					client_handle->msi_vec));
+	client_handle->mhi_dev_ctxt->counters.msi_disable_cntr++;
+	if (client_handle->mhi_dev_ctxt->counters.msi_disable_cntr >
+		   (client_handle->mhi_dev_ctxt->counters.msi_enable_cntr + 1))
+		mhi_log(MHI_MSG_INFO, "No nested IRQ disable Allowed\n");
 }
 void mhi_unmask_irq(mhi_client_handle *client_handle)
 {
+	client_handle->mhi_dev_ctxt->counters.msi_enable_cntr++;
 	enable_irq(MSI_TO_IRQ(client_handle->mhi_dev_ctxt,
 			client_handle->msi_vec));
+	if (client_handle->mhi_dev_ctxt->counters.msi_enable_cntr >
+		   client_handle->mhi_dev_ctxt->counters.msi_disable_cntr)
+		mhi_log(MHI_MSG_INFO, "No nested IRQ enable Allowed\n");
 }
