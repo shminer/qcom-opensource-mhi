@@ -226,7 +226,8 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 			break;
 		}
 
-		dma_unmap_single(&(dev->dev), dma_addr, skb->len,
+		dma_unmap_single(&(dev->dev), dma_addr,
+				(rmnet_mhi_ptr->mru - MHI_RX_HEADROOM),
 				 DMA_FROM_DEVICE);
 		skb_put(skb, result->bytes_xferd);
 
@@ -256,7 +257,7 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 
 		cb_ptr = (uintptr_t *)skb->cb;
 		dma_addr = dma_map_single(&(dev->dev), skb->data,
-					  rmnet_mhi_ptr->mru,
+					 rmnet_mhi_ptr->mru - MHI_RX_HEADROOM,
 					  DMA_FROM_DEVICE);
 		*cb_ptr = (uintptr_t)dma_addr;
 
@@ -275,7 +276,8 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 				    MHI_DMA_MASK))) {
 			pr_err("%s: RX buffer is out of MHI DMA address range",
 			       __func__);
-			dma_unmap_single(&(dev->dev), dma_addr, skb->len,
+			dma_unmap_single(&(dev->dev), dma_addr,
+					(rmnet_mhi_ptr->mru - MHI_RX_HEADROOM),
 							 DMA_FROM_DEVICE);
 			kfree_skb(skb);
 			break;
@@ -289,7 +291,8 @@ static int rmnet_mhi_poll(struct napi_struct *napi, int budget)
 			/* TODO: Handle error */
 			pr_err("%s: mhi_queue_xfer failed, error %d",
 			       __func__, res);
-			dma_unmap_single(&(dev->dev), dma_addr, skb->len,
+			dma_unmap_single(&(dev->dev), dma_addr,
+					(rmnet_mhi_ptr->mru - MHI_RX_HEADROOM),
 							 DMA_FROM_DEVICE);
 
 			kfree_skb(skb);
@@ -556,7 +559,8 @@ static int rmnet_mhi_open(struct net_device *dev)
 		cb_ptr = (uintptr_t *)skb->cb;
 
 		dma_addr = dma_map_single(&(dev->dev), skb->data,
-					  rmnet_mhi_ptr->mru, DMA_FROM_DEVICE);
+					  (rmnet_mhi_ptr->mru - MHI_RX_HEADROOM),
+					  DMA_FROM_DEVICE);
 		*cb_ptr = (uintptr_t)dma_addr;
 		if (dma_mapping_error(&(dev->dev), dma_addr)) {
 			pr_err("%s: DMA mapping for RX buffers has failed",
