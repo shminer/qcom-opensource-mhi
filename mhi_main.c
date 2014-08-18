@@ -1204,19 +1204,25 @@ MHI_STATUS parse_outbound(mhi_device_ctxt *mhi_dev_ctxt, u32 chan,
 	return MHI_STATUS_SUCCESS;
 }
 
-MHI_STATUS probe_clients(mhi_device_ctxt *mhi_dev_ctxt)
+MHI_STATUS probe_clients(mhi_device_ctxt *mhi_dev_ctxt,STATE_TRANSITION new_state)
 {
 	int ret_val = 0;
-	mhi_dev_ctxt->mhi_rmnet_dev = platform_device_alloc("mhi_rmnet",-1);
-	ret_val = platform_device_add(mhi_dev_ctxt->mhi_rmnet_dev);
-	if (ret_val)
-		mhi_log(MHI_MSG_CRITICAL, "Failed to add MHI_RmNET device.\n");
+	if (new_state == STATE_TRANSITION_AMSS) {
+		probe_clients(mhi_dev_ctxt, STATE_TRANSITION_SBL);
+		mhi_dev_ctxt->mhi_rmnet_dev = platform_device_alloc("mhi_rmnet",-1);
+		ret_val = platform_device_add(mhi_dev_ctxt->mhi_rmnet_dev);
+		if (ret_val)
+			mhi_log(MHI_MSG_CRITICAL, "Failed to add MHI_RmNET device.\n");
+	} else if (new_state == STATE_TRANSITION_SBL) {
+		if (0 == mhi_dev_ctxt->flags.uci_probed) {
+			mhi_dev_ctxt->mhi_uci_dev = platform_device_alloc("mhi_uci",-1);
+			ret_val = platform_device_add(mhi_dev_ctxt->mhi_uci_dev);
 
-	mhi_dev_ctxt->mhi_uci_dev = platform_device_alloc("mhi_uci",-1);
-	ret_val = platform_device_add(mhi_dev_ctxt->mhi_uci_dev);
-
-	if (ret_val)
-		mhi_log(MHI_MSG_CRITICAL, "Failed to add MHI_SHIM device.\n");
+			if (ret_val)
+				mhi_log(MHI_MSG_CRITICAL, "Failed to add MHI_SHIM device.\n");
+			mhi_dev_ctxt->flags.uci_probed = 1;
+		}
+	}
 	return ret_val;
 }
 
