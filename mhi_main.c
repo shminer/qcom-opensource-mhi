@@ -489,8 +489,8 @@ MHI_STATUS mhi_wake_dev_from_m3(mhi_device_ctxt *mhi_dev_ctxt)
 			mhi_log(MHI_MSG_INFO,
 			"Resume is pending, quitting ...\n");
 			atomic_set(&mhi_dev_ctxt->flags.m0_work_enabled, 0);
-			__pm_stay_awake(&mhi_dev_ctxt->wake_lock);
-			__pm_relax(&mhi_dev_ctxt->wake_lock);
+			mhi_wake(mhi_dev_ctxt);
+			mhi_wake_relax(mhi_dev_ctxt);
 			return MHI_STATUS_SUCCESS;
 		}
 		r = queue_work(mhi_dev_ctxt->work_queue,
@@ -1290,4 +1290,16 @@ int mhi_set_bus_request(struct mhi_device_ctxt *mhi_dev_ctxt,
 	mhi_log(MHI_MSG_INFO, "Setting bus request to index %d\n", index);
 	return msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client,
 							index);
+}
+
+void mhi_wake(struct mhi_device_ctxt *mhi_dev_ctxt)
+{
+	mhi_log(MHI_MSG_INFO, "System cannot sleep.\n");
+	__pm_stay_awake(&mhi_dev_ctxt->wake_lock);
+
+}
+void mhi_wake_relax(struct mhi_device_ctxt *mhi_dev_ctxt)
+{
+	mhi_log(MHI_MSG_INFO, "System may sleep.\n");
+	__pm_relax(&mhi_dev_ctxt->wake_lock);
 }
