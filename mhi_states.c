@@ -250,7 +250,7 @@ MHI_STATUS process_WAKE_transition(mhi_device_ctxt *mhi_dev_ctxt,
 {
 	MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
 	mhi_log(MHI_MSG_INFO, "Entered\n");
-	__pm_stay_awake(&mhi_dev_ctxt->wake_lock);
+	mhi_wake(mhi_dev_ctxt);
 
 	ret_val = mhi_turn_on_pcie_link(mhi_dev_ctxt);
 
@@ -277,7 +277,7 @@ MHI_STATUS process_WAKE_transition(mhi_device_ctxt *mhi_dev_ctxt,
 	}
 exit:
 	mhi_log(MHI_MSG_INFO, "Exited.\n");
-	__pm_relax(&mhi_dev_ctxt->wake_lock);
+	mhi_wake_relax(mhi_dev_ctxt);
 	return ret_val;
 
 }
@@ -964,8 +964,8 @@ int mhi_initiate_m3(mhi_device_ctxt *mhi_dev_ctxt)
 		mhi_log(MHI_MSG_INFO | MHI_DBG_POWER,
 			"There are still %d acks pending from device\n",
 			atomic_read(&mhi_dev_ctxt->counters.outbound_acks));
-			__pm_stay_awake(&mhi_dev_ctxt->wake_lock);
-			__pm_relax(&mhi_dev_ctxt->wake_lock);
+			mhi_wake(mhi_dev_ctxt);
+			mhi_wake_relax(mhi_dev_ctxt);
 		goto exit;
 	}
 	if (atomic_read(&mhi_dev_ctxt->flags.data_pending))

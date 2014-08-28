@@ -149,15 +149,29 @@ MHI_STATUS mhi_process_event_ring(mhi_device_ctxt *mhi_dev_ctxt,
 			mhi_log(MHI_MSG_INFO,
 					"MHI CCE received ring 0x%x\n",
 					ev_index);
-			__pm_stay_awake(&mhi_dev_ctxt->wake_lock);
-			__pm_relax(&mhi_dev_ctxt->wake_lock);
+			mhi_wake(mhi_dev_ctxt);
+			mhi_wake_relax(mhi_dev_ctxt);
 			parse_cmd_event(mhi_dev_ctxt,
 					&event_to_process);
 			break;
 		case MHI_PKT_TYPE_TX_EVENT:
-			__pm_stay_awake(&mhi_dev_ctxt->wake_lock);
-			parse_xfer_event(mhi_dev_ctxt, &event_to_process);
-			__pm_relax(&mhi_dev_ctxt->wake_lock);
+			{
+				u32 chan = MHI_EV_READ_CHID(EV_CHID, &event_to_process);
+
+				if ((MHI_EV_READ_CODE(EV_TRB_CODE, &event_to_process) ==
+								MHI_EVENT_CC_DB_MODE) &&
+					    (chan == MHI_CLIENT_IP_HW_0_OUT) &&
+					    (mhi_dev_ctxt->mhi_local_chan_ctxt[chan].rp ==
+					     mhi_dev_ctxt->mhi_local_chan_ctxt[chan].wp))
+				{
+					mhi_dev_ctxt->db_mode[MHI_CLIENT_IP_HW_0_OUT] = 1;
+					mhi_log(MHI_MSG_INFO, "Empty OOB chan %d\n", chan);
+				} else {
+					mhi_wake(mhi_dev_ctxt);
+					parse_xfer_event(mhi_dev_ctxt, &event_to_process);
+					mhi_wake_relax(mhi_dev_ctxt);
+				}
+			}
 			break;
 		case MHI_PKT_TYPE_STATE_CHANGE_EVENT:
 		{
@@ -166,10 +180,6 @@ MHI_STATUS mhi_process_event_ring(mhi_device_ctxt *mhi_dev_ctxt,
 			mhi_log(MHI_MSG_INFO,
 					"MHI STE received ring 0x%x\n",
 					ev_index);
-			if (new_state != STATE_TRANSITION_M3) {
-				__pm_stay_awake(&mhi_dev_ctxt->wake_lock);
-				__pm_relax(&mhi_dev_ctxt->wake_lock);
-			}
 			mhi_init_state_transition(mhi_dev_ctxt, new_state);
 			break;
 		}
@@ -179,8 +189,8 @@ MHI_STATUS mhi_process_event_ring(mhi_device_ctxt *mhi_dev_ctxt,
 			mhi_log(MHI_MSG_INFO,
 					"MHI EEE received ring 0x%x\n",
 					ev_index);
-			__pm_stay_awake(&mhi_dev_ctxt->wake_lock);
-			__pm_relax(&mhi_dev_ctxt->wake_lock);
+			mhi_wake(mhi_dev_ctxt);
+			mhi_wake_relax(mhi_dev_ctxt);
 			switch(MHI_READ_EXEC_ENV(&event_to_process)) {
 			case MHI_EXEC_ENV_SBL:
 				new_state = STATE_TRANSITION_SBL;
