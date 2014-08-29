@@ -658,8 +658,7 @@ MHI_STATUS process_SBL_transition(mhi_device_ctxt *mhi_dev_ctxt,
 	}
 
 	if (!mhi_dev_ctxt->flags.mhi_clients_probed) {
-		ret_val = probe_clients(mhi_dev_ctxt);
-		mhi_dev_ctxt->flags.mhi_clients_probed = 1;
+		ret_val = probe_clients(mhi_dev_ctxt, cur_work_item);
 	}
 
 	return MHI_STATUS_SUCCESS;
@@ -675,7 +674,12 @@ MHI_STATUS process_AMSS_transition(mhi_device_ctxt *mhi_dev_ctxt,
 	write_lock_irqsave(&mhi_dev_ctxt->xfer_lock, flags);
 	atomic_inc(&mhi_dev_ctxt->flags.data_pending);
 	mhi_assert_device_wake(mhi_dev_ctxt);
+
 	write_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
+	ret_val = mhi_add_elements_to_event_rings(mhi_dev_ctxt,
+			cur_work_item);
+	if (MHI_STATUS_SUCCESS != ret_val)
+		return MHI_STATUS_ERROR;
 	for (chan = 0; chan <= MHI_MAX_CHANNELS; ++chan) {
 		if (VALID_CHAN_NR(chan)) {
 			chan_ctxt =
@@ -703,10 +707,7 @@ MHI_STATUS process_AMSS_transition(mhi_device_ctxt *mhi_dev_ctxt,
 	wait_event_interruptible(*mhi_dev_ctxt->chan_start_complete,
 		atomic_read(&mhi_dev_ctxt->start_cmd_pending_ack) == 0);
 	if (0 == mhi_dev_ctxt->flags.mhi_initialized) {
-		ret_val = mhi_add_elements_to_event_rings(mhi_dev_ctxt,
-					cur_work_item);
-		if (MHI_STATUS_SUCCESS != ret_val)
-			return MHI_STATUS_ERROR;
+
 		mhi_dev_ctxt->flags.mhi_initialized = 1;
 		ret_val = mhi_set_state_of_all_channels(mhi_dev_ctxt,
 				MHI_CHAN_STATE_RUNNING);
@@ -714,7 +715,7 @@ MHI_STATUS process_AMSS_transition(mhi_device_ctxt *mhi_dev_ctxt,
 			mhi_log(MHI_MSG_CRITICAL,
 				"Failed to set local chan state\n");
 		if (!mhi_dev_ctxt->flags.mhi_clients_probed) {
-			ret_val = probe_clients(mhi_dev_ctxt);
+			ret_val = probe_clients(mhi_dev_ctxt, cur_work_item);
 				if (ret_val != MHI_STATUS_SUCCESS)
 						mhi_log(MHI_MSG_CRITICAL,
 						"Failed to probe MHI CORE clients.\n");

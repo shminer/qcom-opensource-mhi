@@ -11,7 +11,7 @@
  */
 
 #include "mhi_sys.h"
-MHI_DEBUG_LEVEL mhi_msg_lvl = MHI_MSG_INFO;
+MHI_DEBUG_LEVEL mhi_msg_lvl = MHI_MSG_CRITICAL;
 MHI_DEBUG_LEVEL mhi_ipc_log_lvl = MHI_MSG_INFO;
 MHI_DEBUG_CLASS mhi_msg_class = MHI_DBG_DATA | MHI_DBG_POWER;
 

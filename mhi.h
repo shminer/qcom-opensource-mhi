@@ -406,6 +406,7 @@ typedef struct mhi_counters {
 typedef struct mhi_flags {
 	u32 mhi_initialized;
 	u32 mhi_clients_probed;
+	u32 uci_probed;
 	volatile u32 pending_M3;
 	volatile u32 pending_M0;
 	u32 link_up;
@@ -628,7 +629,7 @@ void ring_all_ev_dbs(mhi_device_ctxt *mhi_dev_ctxt);
 enum hrtimer_restart mhi_initiate_M1(struct hrtimer *timer);
 int mhi_suspend(struct pci_dev *dev, pm_message_t state);
 int mhi_resume(struct pci_dev *dev);
-MHI_STATUS probe_clients(mhi_device_ctxt *mhi_dev_ctxt);
+MHI_STATUS probe_clients(mhi_device_ctxt *mhi_dev_ctxt,STATE_TRANSITION new_state);
 int rmnet_mhi_probe(struct pci_dev *dev);
 int mhi_shim_probe(struct pci_dev *dev);
 int mhi_init_pcie_device(mhi_pcie_dev_info *mhi_pcie_dev);
