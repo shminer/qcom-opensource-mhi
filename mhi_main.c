@@ -815,6 +815,18 @@ MHI_STATUS recycle_trb_and_ring(mhi_device_ctxt *mhi_dev_ctxt,
 			(mhi_xfer_pkt *)added_element;
 		added_xfer_pkt->data_tx_pkt =
 				*(mhi_tx_pkt *)removed_xfer_pkt;
+	} else if (MHI_RING_TYPE_EVENT_RING == ring_type &&
+		   mhi_dev_ctxt->counters.m0_m3 > 0 &&
+		   IS_HARDWARE_CHANNEL(ring_index)) {
+		spinlock_t *lock = NULL;
+		unsigned long flags = 0;
+		mhi_log(MHI_MSG_ERROR, "Updating EV_CTXT\n");
+		lock = &mhi_dev_ctxt->mhi_ev_spinlock_list[ring_index];
+		spin_lock_irqsave(lock, flags);
+		mhi_dev_ctxt->mhi_ev_db_order[ring_index] = 1;
+		mhi_dev_ctxt->mhi_ctrl_seg->mhi_ec_list[ring_index].mhi_event_write_ptr = db_value;
+		mhi_dev_ctxt->ev_counter[ring_index]++;
+		spin_unlock_irqrestore(lock, flags);
 	}
 	atomic_inc(&mhi_dev_ctxt->flags.data_pending);
 	/* Asserting Device Wake here, will imediately wake mdm */
