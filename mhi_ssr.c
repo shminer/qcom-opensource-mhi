@@ -127,8 +127,8 @@ void mhi_link_state_cb(struct msm_pcie_notify *notify)
 	case MSM_PCIE_EVENT_WAKEUP:
 		mhi_log(MHI_MSG_CRITICAL,
 			"Received MSM_PCIE_EVENT_WAKE\n");
-		__pm_stay_awake(&mhi_dev_ctxt->wake_lock);
-		__pm_relax(&mhi_dev_ctxt->wake_lock);
+		mhi_wake(mhi_dev_ctxt);
+		mhi_wake_relax(mhi_dev_ctxt);
 		if (atomic_read(&mhi_dev_ctxt->flags.pending_resume)) {
 			mhi_log(MHI_MSG_INFO,
 				"There is a pending resume, doing nothing \n");
