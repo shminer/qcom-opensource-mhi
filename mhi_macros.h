@@ -110,13 +110,13 @@
 #define EV_TRB_CODE
 #define MHI_EV_TRB_CODE__MASK (0xFF)
 #define MHI_EV_TRB_CODE__SHIFT (24)
-#define MHI_EV_READ_CODE(_FIELD, _PKT) (((_PKT->type).xfer_details >> \
+#define MHI_EV_READ_CODE(_FIELD, _PKT) ((((_PKT)->type).xfer_details >> \
 			MHI_##_FIELD ## __SHIFT) & \
 		MHI_ ##_FIELD ## __MASK)
 #define EV_LEN
 #define MHI_EV_LEN__MASK (0xFFFF)
 #define MHI_EV_LEN__SHIFT (0)
-#define MHI_EV_READ_LEN(_FIELD, _PKT) (((_PKT->xfer_event_pkt).xfer_details >> \
+#define MHI_EV_READ_LEN(_FIELD, _PKT) ((((_PKT)->xfer_event_pkt).xfer_details >> \
 			MHI_##_FIELD ## __SHIFT) & \
 		MHI_ ##_FIELD ## __MASK)
 
