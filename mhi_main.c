@@ -489,8 +489,8 @@ MHI_STATUS mhi_wake_dev_from_m3(mhi_device_ctxt *mhi_dev_ctxt)
 			mhi_log(MHI_MSG_INFO,
 			"Resume is pending, quitting ...\n");
 			atomic_set(&mhi_dev_ctxt->flags.m0_work_enabled, 0);
-			__pm_stay_awake(&mhi_dev_ctxt->wake_lock);
-			__pm_relax(&mhi_dev_ctxt->wake_lock);
+			mhi_wake(mhi_dev_ctxt);
+			mhi_wake_relax(mhi_dev_ctxt);
 			return MHI_STATUS_SUCCESS;
 		}
 		r = queue_work(mhi_dev_ctxt->work_queue,
@@ -815,6 +815,18 @@ MHI_STATUS recycle_trb_and_ring(mhi_device_ctxt *mhi_dev_ctxt,
 			(mhi_xfer_pkt *)added_element;
 		added_xfer_pkt->data_tx_pkt =
 				*(mhi_tx_pkt *)removed_xfer_pkt;
+	} else if (MHI_RING_TYPE_EVENT_RING == ring_type &&
+		   mhi_dev_ctxt->counters.m0_m3 > 0 &&
+		   IS_HARDWARE_CHANNEL(ring_index)) {
+		spinlock_t *lock = NULL;
+		unsigned long flags = 0;
+		mhi_log(MHI_MSG_ERROR, "Updating EV_CTXT\n");
+		lock = &mhi_dev_ctxt->mhi_ev_spinlock_list[ring_index];
+		spin_lock_irqsave(lock, flags);
+		mhi_dev_ctxt->mhi_ev_db_order[ring_index] = 1;
+		mhi_dev_ctxt->mhi_ctrl_seg->mhi_ec_list[ring_index].mhi_event_write_ptr = db_value;
+		mhi_dev_ctxt->ev_counter[ring_index]++;
+		spin_unlock_irqrestore(lock, flags);
 	}
 	atomic_inc(&mhi_dev_ctxt->flags.data_pending);
 	/* Asserting Device Wake here, will imediately wake mdm */
@@ -1290,4 +1302,16 @@ int mhi_set_bus_request(struct mhi_device_ctxt *mhi_dev_ctxt,
 	mhi_log(MHI_MSG_INFO, "Setting bus request to index %d\n", index);
 	return msm_bus_scale_client_update_request(mhi_dev_ctxt->bus_client,
 							index);
+}
+
+void mhi_wake(struct mhi_device_ctxt *mhi_dev_ctxt)
+{
+	mhi_log(MHI_MSG_INFO, "System cannot sleep.\n");
+	__pm_stay_awake(&mhi_dev_ctxt->wake_lock);
+
+}
+void mhi_wake_relax(struct mhi_device_ctxt *mhi_dev_ctxt)
+{
+	mhi_log(MHI_MSG_INFO, "System may sleep.\n");
+	__pm_relax(&mhi_dev_ctxt->wake_lock);
 }

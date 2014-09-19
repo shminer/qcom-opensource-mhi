@@ -666,5 +666,7 @@ int mhi_initiate_m0(mhi_device_ctxt *mhi_dev_ctxt);
 int mhi_initiate_m3(mhi_device_ctxt *mhi_dev_ctxt);
 int mhi_set_bus_request(struct mhi_device_ctxt *mhi_dev_ctxt,
 					int index);
+void mhi_wake_relax(struct mhi_device_ctxt *mhi_dev_ctxt);
+void mhi_wake(struct mhi_device_ctxt *mhi_dev_ctxt);
 
 #endif
