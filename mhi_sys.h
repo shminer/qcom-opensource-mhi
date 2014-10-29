@@ -86,7 +86,8 @@ extern void *mhi_ipc_log;
 #define pcie_write(base, offset, val) do {				\
 				writel_relaxed(val,			\
 					(volatile void *)(uintptr_t)(base + offset)); \
-				pcie_read(base, offset);		\
+				wmb();					\
+				PULSE_L1_EXIT(0);			\
 				} while (0)
 
 irqreturn_t irq_cb(int msi_number, void *dev_id);
