@@ -208,6 +208,7 @@
 		(addr) = (u32)(_base) + (u32)(_offset); \
 		*(volatile u32 *)(addr) = (_val); \
 		wmb(); \
+		PULSE_L1_EXIT(0);				\
 		mhi_log(MHI_MSG_INFO, "d.s 0x%x %%LONG 0x%x\n", \
 				(u32)(_offset),\
 				(u32)(_val)); \
@@ -288,6 +289,12 @@
 		mhi_dev_ctxt->db_mode[_index] = 0;   \
 	}					     \
 }
+
+#define PULSE_L1_EXIT(_dev) msm_pcie_pm_control(MSM_PCIE_REQ_EXIT_L1,	\
+			mhi_devices.device_list[_dev].pcie_device->bus->number, \
+			mhi_devices.device_list[_dev].pcie_device, \
+			NULL, \
+			0)
 
 #define EVENT_RING_MSI_VEC
 #define MHI_EVENT_RING_MSI_VEC__MASK (0xf)
