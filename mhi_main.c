@@ -376,7 +376,6 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 	MHI_CLIENT_CHANNEL chan;
 	mhi_device_ctxt *mhi_dev_ctxt;
 	unsigned long flags;
-	uintptr_t trb_index;
 
 	if (NULL == client_handle || !VALID_CHAN_NR(client_handle->chan) ||
 		0 == buf || chain >= MHI_TRE_CHAIN_LIMIT || 0 == buf_len) {
@@ -398,19 +397,8 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 		mhi_assert_device_wake(mhi_dev_ctxt);
 	read_unlock_irqrestore(&mhi_dev_ctxt->xfer_lock, flags);
 
-
-	/* Add the TRB to the correct transfer ring */
-	ret_val = ctxt_add_element(&mhi_dev_ctxt->mhi_local_chan_ctxt[chan],
-				(void *)&pkt_loc);
-	if (unlikely(MHI_STATUS_SUCCESS != ret_val)) {
-		mhi_log(MHI_MSG_INFO, "Failed to insert trb in xfer ring\n");
-		goto error;
-	}
-
+	pkt_loc = mhi_dev_ctxt->mhi_local_chan_ctxt[chan].wp;
 	pkt_loc->data_tx_pkt.buffer_ptr = buf;
-
-	get_element_index(&mhi_dev_ctxt->mhi_local_chan_ctxt[chan],
-				pkt_loc, &trb_index);
 
 	if (likely(0 != client_handle->intmod_t))
 		MHI_TRB_SET_INFO(TX_TRB_BEI, pkt_loc, 1);
@@ -428,6 +416,14 @@ MHI_STATUS mhi_queue_xfer(mhi_client_handle *client_handle,
 		mhi_log(MHI_MSG_VERBOSE,
 			"Queued outbound pkt. Pending Acks %d\n",
 		atomic_read(&mhi_dev_ctxt->counters.outbound_acks));
+	}
+
+	/* Add the TRB to the correct transfer ring */
+	ret_val = ctxt_add_element(&mhi_dev_ctxt->mhi_local_chan_ctxt[chan],
+				(void *)&pkt_loc);
+	if (unlikely(MHI_STATUS_SUCCESS != ret_val)) {
+		mhi_log(MHI_MSG_INFO, "Failed to insert trb in xfer ring\n");
+		goto error;
 	}
 	mhi_notify_device(mhi_dev_ctxt, chan);
 	atomic_dec(&mhi_dev_ctxt->flags.data_pending);
@@ -466,8 +462,8 @@ MHI_STATUS mhi_notify_device(mhi_device_ctxt *mhi_dev_ctxt, u32 chan)
 		}
 	} else {
 		mhi_log(MHI_MSG_VERBOSE,
-			"Triggering wakeup due to pending data MHI state %d, Chan state %d\n",
-			mhi_dev_ctxt->mhi_state, chan_ctxt->mhi_chan_state);
+			"Triggering wakeup due to pending data MHI state %d, Chan state %d, Pending M3 %d\n",
+			mhi_dev_ctxt->mhi_state, chan_ctxt->mhi_chan_state, mhi_dev_ctxt->flags.pending_M3);
 		if (mhi_dev_ctxt->flags.pending_M3 ||
 		    mhi_dev_ctxt->mhi_state == MHI_STATE_M3) {
 			mhi_wake_dev_from_m3(mhi_dev_ctxt);

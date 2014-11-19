@@ -250,6 +250,7 @@
 	mhi_log(MHI_MSG_VERBOSE,						\
 			"db.set addr: 0x%llX offset 0x%x val:0x%llX\n",		\
 			(u64)_addr, (unsigned int)_index, (u64)_val);		\
+	wmb();									\
 	if (mhi_dev_ctxt->channel_db_addr == (_addr)) {				\
 		(_mhi_dev_ctxt)->mhi_ctrl_seg->mhi_cc_list[_index].mhi_trb_write_ptr = (_val);  \
 	} else if (mhi_dev_ctxt->event_db_addr == (_addr)) {				     \
